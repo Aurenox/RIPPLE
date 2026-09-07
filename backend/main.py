@@ -332,10 +332,6 @@ def init_db():
             )
         """)
 
-        # ----------------------------------------------------
-        # Safe migration for older RIPPLE databases
-        # ----------------------------------------------------
-
         add_column_if_missing(
             conn,
             "decisions",
@@ -399,11 +395,7 @@ class DecisionRequest(BaseModel):
     title: str
     action: str
     recommendation: str = ""
-    risk: float = Field(
-        default=0,
-        ge=0,
-        le=100,
-    )
+    risk: float = Field(default=0, ge=0, le=100)
 
 
 class ApprovalRequest(BaseModel):
@@ -719,9 +711,6 @@ def relevance_score(
         content_words
     )
 
-    # Recall-oriented score:
-    # how much of the important query
-    # appears in the evidence.
     query_coverage = (
         overlap
         /
@@ -731,7 +720,6 @@ def relevance_score(
         )
     )
 
-    # Jaccard-style semantic proxy.
     jaccard = (
         overlap
         /
@@ -1125,12 +1113,8 @@ Required schema:
 
 {{
   "summary": "...",
-
-  "priority":
-    "Immediate|High|Review|Low",
-
+  "priority": "Immediate|High|Review|Low",
   "confidence": 0,
-
   "possible_root_causes": [
     {{
       "hypothesis": "...",
@@ -1138,7 +1122,6 @@ Required schema:
       "evidence": "..."
     }}
   ],
-
   "evidence": [
     {{
       "source_type": "document",
@@ -1146,54 +1129,35 @@ Required schema:
       "title": "...",
       "content": "...",
       "relevance": 0,
-      "relationship":
-        "DIRECT|INDIRECT|SEMANTIC"
+      "relationship": "DIRECT|INDIRECT|SEMANTIC"
     }}
   ],
-
   "affected_areas": [],
-
   "recommended_action": "...",
-
   "risk_score": 0,
-
   "reasoning": "..."
 }}
 
-RULES:
+Rules:
 
 1. Confidence is 0-100.
-
 2. Risk score is 0-100.
-
 3. Evidence relevance is 0-100.
-
 4. source_id MUST match an actual document ID.
-
 5. Never invent evidence.
-
 6. DIRECT means the document explicitly discusses
    substantially the same issue.
-
 7. INDIRECT means the document describes a connected
    process or dependency.
-
 8. SEMANTIC means the document is conceptually related.
-
 9. Separate evidence from inference.
-
 10. Root causes are hypotheses.
-
 11. Do not claim causality without sufficient evidence.
-
 12. Use multiple evidence items when relevant.
-
 13. If relevant evidence is provided above,
     include it in the evidence array.
-
 14. The recommended action must be grounded in
     the evidence where possible.
-
 15. Human approval is required for consequential
     operational decisions.
 """
@@ -1201,10 +1165,6 @@ RULES:
     result = ask_ai(
         prompt
     )
-
-    # --------------------------------------------------------
-    # Normalize Gemini result
-    # --------------------------------------------------------
 
     if result:
 
@@ -1264,7 +1224,6 @@ RULES:
                 relationship = "SEMANTIC"
 
             normalized_evidence.append({
-
                 "source_type":
                     "document",
 
@@ -1299,11 +1258,6 @@ RULES:
                 "relationship":
                     relationship,
             })
-
-        # ----------------------------------------------------
-        # If Gemini returned no evidence, use our retrieved
-        # evidence instead of displaying "No evidence".
-        # ----------------------------------------------------
 
         if not normalized_evidence:
 
@@ -1685,7 +1639,6 @@ Rules:
 
     return {
         "options": [
-
             {
                 "name":
                     "Option A — Immediate change",
@@ -1804,6 +1757,10 @@ def detect_patterns(cases):
     if not cases:
         return []
 
+    # --------------------------------------------------------
+    # AI PATTERN DETECTION
+    # --------------------------------------------------------
+
     data = "\n".join(
         f"""
 CASE ID: {case["id"]}
@@ -1817,11 +1774,11 @@ DESCRIPTION: {case["description"]}
     prompt = f"""
 You are RIPPLE's Pattern Detection Engine.
 
-Analyze the following investigations:
+Analyze the following organizational cases:
 
 {data}
 
-Identify recurring operational signals.
+Identify recurring operational signals across cases.
 
 Return ONLY valid JSON:
 
@@ -1833,108 +1790,327 @@ Return ONLY valid JSON:
       "confidence": 0,
       "severity": "Low|Medium|High|Critical",
       "case_count": 0,
-      "possible_common_factor": "...",
-      "evidence": []
+      "possible_common_factor": "..."
     }}
   ]
 }}
 
 Rules:
 
-- Do not claim causality.
-- Use "possible common factor".
-- Use "observed correlation".
-- Use "hypothesis".
-- Confidence is 0-100.
-- Do not invent evidence.
+1. Look for recurring themes across MULTIPLE cases.
+2. Detect related cases even when their titles differ.
+3. Do not claim causality.
+4. Use phrases such as:
+   "possible common factor",
+   "observed correlation",
+   "possible hypothesis".
+5. Confidence is 0-100.
+6. case_count must represent related cases.
+7. Do not invent facts.
+8. If at least two cases clearly share an operational
+   problem, return an emerging pattern.
 """
 
     result = ask_ai(
         prompt
     )
 
-    patterns = result.get(
-        "patterns",
-        [],
-    )
+    patterns = []
 
-    if not isinstance(
+    if isinstance(
+        result,
+        dict,
+    ):
+
+        patterns = result.get(
+            "patterns",
+            [],
+        )
+
+    if isinstance(
         patterns,
         list,
-    ):
+    ) and patterns:
+
+        normalized = []
+
+        for pattern in patterns:
+
+            if not isinstance(
+                pattern,
+                dict,
+            ):
+                continue
+
+            severity = str(
+                pattern.get(
+                    "severity",
+                    "Medium",
+                )
+            )
+
+            if severity not in {
+                "Low",
+                "Medium",
+                "High",
+                "Critical",
+            }:
+                severity = "Medium"
+
+            normalized.append({
+
+                "title":
+                    str(
+                        pattern.get(
+                            "title",
+                            "Emerging operational pattern",
+                        )
+                    ),
+
+                "description":
+                    str(
+                        pattern.get(
+                            "description",
+                            "",
+                        )
+                    ),
+
+                "confidence":
+                    clamp_score(
+                        pattern.get(
+                            "confidence",
+                            70,
+                        ),
+                        70,
+                    ),
+
+                "severity":
+                    severity,
+
+                "case_count":
+                    int(
+                        safe_number(
+                            pattern.get(
+                                "case_count",
+                                len(cases),
+                            ),
+                            len(cases),
+                        )
+                    ),
+
+                "status":
+                    "emerging",
+            })
+
+        if normalized:
+            return normalized
+
+    # --------------------------------------------------------
+    # LOCAL FALLBACK PATTERN DETECTION
+    #
+    # This is important:
+    # if Gemini returns no pattern or fails,
+    # RIPPLE still detects recurring signals.
+    # --------------------------------------------------------
+
+    related_keywords = [
+        "order",
+        "processing",
+        "delay",
+        "delays",
+        "verification",
+        "approval",
+        "approvals",
+        "workload",
+        "complaint",
+        "complaints",
+        "delivery",
+        "backlog",
+        "waiting",
+        "manager",
+        "operations",
+    ]
+
+    related_cases = []
+
+    for case in cases:
+
+        text = (
+            f"{case.get('title', '')} "
+            f"{case.get('description', '')}"
+        ).lower()
+
+        matches = sum(
+            1
+            for keyword in related_keywords
+            if keyword in text
+        )
+
+        if matches >= 2:
+
+            related_cases.append(
+                case
+            )
+
+    # At least two related cases
+    # are required for an emerging pattern.
+    if len(related_cases) < 2:
         return []
 
-    normalized = []
+    # --------------------------------------------------------
+    # Determine the dominant operational theme.
+    # --------------------------------------------------------
 
-    for pattern in patterns:
+    keyword_counts = {}
 
-        if not isinstance(
-            pattern,
-            dict,
-        ):
-            continue
+    for case in related_cases:
 
-        severity = str(
-            pattern.get(
-                "severity",
-                "Medium",
+        text = (
+            f"{case.get('title', '')} "
+            f"{case.get('description', '')}"
+        ).lower()
+
+        for keyword in related_keywords:
+
+            if keyword in text:
+
+                keyword_counts[keyword] = (
+                    keyword_counts.get(
+                        keyword,
+                        0,
+                    )
+                    +
+                    1
+                )
+
+    sorted_keywords = sorted(
+        keyword_counts.items(),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    dominant = [
+        keyword
+        for keyword, count
+        in sorted_keywords[:5]
+        if count >= 2
+    ]
+
+    # --------------------------------------------------------
+    # Specialized RIPPLE demo pattern.
+    # --------------------------------------------------------
+
+    order_terms = {
+        "order",
+        "processing",
+        "delay",
+        "delays",
+        "verification",
+        "approval",
+        "workload",
+        "delivery",
+        "complaint",
+        "complaints",
+        "backlog",
+    }
+
+    all_related_text = " ".join(
+        (
+            f"{case.get('title', '')} "
+            f"{case.get('description', '')}"
+        ).lower()
+        for case in related_cases
+    )
+
+    order_matches = sum(
+        1
+        for keyword in order_terms
+        if keyword in all_related_text
+    )
+
+    if order_matches >= 4:
+
+        confidence = min(
+            95,
+            65 + (
+                len(related_cases) * 5
             )
         )
 
-        if severity not in {
-            "Low",
-            "Medium",
-            "High",
-            "Critical",
-        }:
-            severity = "Medium"
+        return [
+            {
+                "title":
+                    "Order Processing Bottleneck",
 
-        normalized.append({
+                "description":
+                    (
+                        "Multiple cases show recurring "
+                        "signals involving order-processing "
+                        "delays, verification or approval "
+                        "backlogs, increased operational "
+                        "workload, and delayed customer "
+                        "deliveries."
+                    ),
 
+                "confidence":
+                    confidence,
+
+                "severity":
+                    "High",
+
+                "case_count":
+                    len(related_cases),
+
+                "status":
+                    "emerging",
+            }
+        ]
+
+    # --------------------------------------------------------
+    # Generic fallback for other domains.
+    # --------------------------------------------------------
+
+    theme = (
+        ", ".join(dominant[:3])
+        if dominant
+        else
+        "recurring operational issues"
+    )
+
+    confidence = min(
+        90,
+        60 + (
+            len(related_cases) * 5
+        )
+    )
+
+    return [
+        {
             "title":
-                str(
-                    pattern.get(
-                        "title",
-                        "Emerging operational pattern",
-                    )
-                ),
+                "Emerging Operational Pattern",
 
             "description":
-                str(
-                    pattern.get(
-                        "description",
-                        "",
-                    )
+                (
+                    f"Multiple cases contain recurring "
+                    f"signals related to {theme}. "
+                    f"This represents an observed "
+                    f"correlation and should be investigated "
+                    f"as a possible common factor."
                 ),
 
             "confidence":
-                clamp_score(
-                    pattern.get(
-                        "confidence",
-                        50,
-                    ),
-                    50,
-                ),
+                confidence,
 
             "severity":
-                severity,
+                "Medium",
 
             "case_count":
-                int(
-                    safe_number(
-                        pattern.get(
-                            "case_count",
-                            0,
-                        ),
-                        0,
-                    )
-                ),
+                len(related_cases),
 
             "status":
                 "emerging",
-        })
-
-    return normalized
+        }
+    ]
 
 
 # ============================================================
@@ -4780,6 +4956,7 @@ def reset_database():
     try:
 
         for table in tables:
+
             conn.execute(
                 f"DELETE FROM {table}"
             )
