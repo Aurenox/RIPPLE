@@ -4,4 +4,5 @@ python-multipart
 pymupdf
 python-docx
 python-dotenv
-requests
+google-genai
+pydantic

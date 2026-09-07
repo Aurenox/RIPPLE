@@ -1,20 +1,21 @@
+import os
+import re
+import json
+import shutil
+import sqlite3
+from pathlib import Path
+from typing import Optional
+
+import fitz
+from docx import Document as DocxDocument
+from dotenv import load_dotenv
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from pathlib import Path
-from typing import Optional
-from dotenv import load_dotenv
 
-import sqlite3
-import shutil
-import uuid
-import json
-import re
-import os
-import requests
-import fitz
-
-from docx import Document as DocxDocument
+from google import genai
+from google.genai import types
 
 
 # ============================================================
@@ -23,11 +24,48 @@ from docx import Document as DocxDocument
 
 load_dotenv()
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv(
+    "GEMINI_MODEL",
+    "gemini-2.5-flash"
+)
+
+BASE_DIR = Path(__file__).resolve().parent
+
+UPLOAD_DIR = BASE_DIR / "uploads"
+UPLOAD_DIR.mkdir(exist_ok=True)
+
+DATABASE_PATH = BASE_DIR / "ripple.db"
+
+
+# ============================================================
+# GEMINI CLIENT
+# ============================================================
+
+gemini_client = None
+
+if GEMINI_API_KEY:
+    try:
+        gemini_client = genai.Client(
+            api_key=GEMINI_API_KEY
+        )
+        print("Gemini AI: CONNECTED")
+    except Exception as error:
+        print("Gemini initialization error:", error)
+else:
+    print("Gemini AI: API KEY NOT FOUND")
+
+
+# ============================================================
+# FASTAPI
+# ============================================================
+
 app = FastAPI(
     title="RIPPLE API",
-    description="Knowledge Impact & Change Intelligence Platform",
+    description="AI Knowledge Impact & Change Intelligence Platform",
     version="1.0.0"
 )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -40,77 +78,93 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-BASE_DIR = Path(__file__).resolve().parent
-UPLOAD_DIR = BASE_DIR / "uploads"
-DATABASE = BASE_DIR / "ripple.db"
-
-UPLOAD_DIR.mkdir(exist_ok=True)
-
 
 # ============================================================
 # DATABASE
 # ============================================================
 
 def get_db():
-    connection = sqlite3.connect(DATABASE)
+
+    connection = sqlite3.connect(
+        DATABASE_PATH
+    )
+
     connection.row_factory = sqlite3.Row
+
     return connection
 
 
-def initialize_database():
+def init_database():
+
     db = get_db()
 
-    db.execute("""
+    cursor = db.cursor()
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS documents (
-            id TEXT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             filename TEXT NOT NULL,
             file_type TEXT,
-            file_path TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+        """
+    )
 
-    db.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS sections (
-            id TEXT PRIMARY KEY,
-            document_id TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL,
             page_number INTEGER,
             section_title TEXT,
-            paragraph_number INTEGER,
-            content TEXT,
-            FOREIGN KEY(document_id) REFERENCES documents(id)
+            content TEXT NOT NULL,
+            FOREIGN KEY(document_id)
+                REFERENCES documents(id)
         )
-    """)
+        """
+    )
 
-    db.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS changes (
-            id TEXT PRIMARY KEY,
-            title TEXT,
-            old_value TEXT,
-            new_value TEXT,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            old_value TEXT NOT NULL,
+            new_value TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
+        """
+    )
 
-    db.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS impacts (
-            id TEXT PRIMARY KEY,
-            change_id TEXT NOT NULL,
-            section_id TEXT NOT NULL,
-            confidence REAL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            change_id INTEGER NOT NULL,
+            document_id INTEGER NOT NULL,
+            section_id INTEGER NOT NULL,
+            affected INTEGER NOT NULL,
+            confidence REAL NOT NULL,
             reason TEXT,
             suggested_fix TEXT,
             status TEXT DEFAULT 'pending',
-            FOREIGN KEY(change_id) REFERENCES changes(id),
-            FOREIGN KEY(section_id) REFERENCES sections(id)
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(change_id)
+                REFERENCES changes(id),
+            FOREIGN KEY(document_id)
+                REFERENCES documents(id),
+            FOREIGN KEY(section_id)
+                REFERENCES sections(id)
         )
-    """)
+        """
+    )
 
     db.commit()
     db.close()
 
 
-initialize_database()
+init_database()
 
 
 # ============================================================
@@ -118,33 +172,15 @@ initialize_database()
 # ============================================================
 
 class ChangeRequest(BaseModel):
+
     title: str
     old_value: str
     new_value: str
 
 
-class ReviewRequest(BaseModel):
+class ImpactDecision(BaseModel):
+
     status: str
-
-
-# ============================================================
-# HEALTH
-# ============================================================
-
-@app.get("/")
-def root():
-    return {
-        "name": "RIPPLE",
-        "message": "Knowledge Impact & Change Intelligence Platform",
-        "status": "online"
-    }
-
-
-@app.get("/health")
-def health():
-    return {
-        "status": "healthy"
-    }
 
 
 # ============================================================
@@ -152,139 +188,475 @@ def health():
 # ============================================================
 
 def clean_text(text: str) -> str:
-    text = text.replace("\x00", "")
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
+
+    text = text.replace("\x00", " ")
+
+    text = re.sub(
+        r"[ \t]+",
+        " ",
+        text
+    )
+
+    text = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        text
+    )
+
     return text.strip()
 
 
-def split_into_paragraphs(text: str):
-    blocks = re.split(r"\n\s*\n", text)
+def detect_title(text: str) -> str:
 
-    paragraphs = []
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
+    ]
 
-    for block in blocks:
-        block = clean_text(block)
+    if not lines:
+        return "Untitled Section"
 
-        if block:
-            paragraphs.append(block)
+    first_line = lines[0]
 
-    if not paragraphs and text.strip():
-        paragraphs = [clean_text(text)]
+    if len(first_line) <= 100:
+        return first_line
 
-    return paragraphs
+    return "Knowledge Section"
 
+
+# ============================================================
+# PDF EXTRACTION
+# ============================================================
 
 def extract_pdf(file_path: Path):
-    pages = []
-
-    pdf = fitz.open(file_path)
-
-    for page_number, page in enumerate(pdf, start=1):
-
-        text = page.get_text("text")
-
-        text = clean_text(text)
-
-        paragraphs = split_into_paragraphs(text)
-
-        for paragraph_number, paragraph in enumerate(
-            paragraphs,
-            start=1
-        ):
-            pages.append({
-                "page_number": page_number,
-                "paragraph_number": paragraph_number,
-                "section_title": detect_section_title(paragraph),
-                "content": paragraph
-            })
-
-    pdf.close()
-
-    return pages
-
-
-def extract_docx(file_path: Path):
-    document = DocxDocument(file_path)
 
     sections = []
 
-    paragraph_number = 0
+    pdf = fitz.open(file_path)
 
-    for paragraph in document.paragraphs:
+    for page_index, page in enumerate(pdf):
 
-        text = clean_text(paragraph.text)
+        text = page.get_text()
+
+        text = clean_text(text)
 
         if not text:
             continue
 
-        paragraph_number += 1
+        title = detect_title(text)
 
-        sections.append({
-            "page_number": 1,
-            "paragraph_number": paragraph_number,
-            "section_title": detect_section_title(text),
-            "content": text
-        })
+        sections.append(
+            {
+                "page_number": page_index + 1,
+                "section_title": title,
+                "content": text
+            }
+        )
+
+    pdf.close()
 
     return sections
 
 
-def detect_section_title(text: str):
-    words = text.split()
+# ============================================================
+# DOCX EXTRACTION
+# ============================================================
 
-    if len(words) <= 12 and (
-        text.isupper()
-        or text.endswith(":")
-        or text.lower().startswith((
-            "section ",
-            "chapter ",
-            "article ",
-            "policy ",
-            "guidelines "
-        ))
+def extract_docx(file_path: Path):
+
+    document = DocxDocument(
+        file_path
+    )
+
+    sections = []
+
+    current_text = []
+    current_title = "Document Section"
+
+    for paragraph in document.paragraphs:
+
+        text = paragraph.text.strip()
+
+        if not text:
+            continue
+
+        if (
+            paragraph.style
+            and paragraph.style.name
+            and "Heading" in paragraph.style.name
+        ):
+
+            if current_text:
+
+                sections.append(
+                    {
+                        "page_number": None,
+                        "section_title": current_title,
+                        "content": "\n".join(
+                            current_text
+                        )
+                    }
+                )
+
+            current_title = text
+            current_text = []
+
+        else:
+
+            current_text.append(text)
+
+    if current_text:
+
+        sections.append(
+            {
+                "page_number": None,
+                "section_title": current_title,
+                "content": "\n".join(
+                    current_text
+                )
+            }
+        )
+
+    return sections
+
+
+# ============================================================
+# TXT / MD EXTRACTION
+# ============================================================
+
+def extract_text_file(file_path: Path):
+
+    text = file_path.read_text(
+        encoding="utf-8",
+        errors="ignore"
+    )
+
+    text = clean_text(text)
+
+    if not text:
+        return []
+
+    paragraphs = [
+        p.strip()
+        for p in text.split("\n\n")
+        if p.strip()
+    ]
+
+    sections = []
+
+    for index, paragraph in enumerate(
+        paragraphs
     ):
-        return text[:200]
 
-    return None
+        sections.append(
+            {
+                "page_number": index + 1,
+                "section_title": detect_title(
+                    paragraph
+                ),
+                "content": paragraph
+            }
+        )
 
+    return sections
+
+
+# ============================================================
+# UNIVERSAL EXTRACTION
+# ============================================================
 
 def extract_document(file_path: Path):
-    suffix = file_path.suffix.lower()
 
-    if suffix == ".pdf":
+    extension = file_path.suffix.lower()
+
+    if extension == ".pdf":
+
         return extract_pdf(file_path)
 
-    if suffix == ".docx":
+    if extension == ".docx":
+
         return extract_docx(file_path)
 
-    if suffix in [".txt", ".md"]:
-        text = clean_text(
-            file_path.read_text(
-                encoding="utf-8",
-                errors="ignore"
+    if extension in [".txt", ".md"]:
+
+        return extract_text_file(
+            file_path
+        )
+
+    raise ValueError(
+        "Unsupported file type. "
+        "Use PDF, DOCX, TXT or MD."
+    )
+
+
+# ============================================================
+# GEMINI ANALYSIS
+# ============================================================
+
+def ai_analyze_change(
+    title: str,
+    old_value: str,
+    new_value: str,
+    section_title: str,
+    content: str
+):
+
+    if not gemini_client:
+
+        return None
+
+    prompt = f"""
+You are RIPPLE, an AI Knowledge Impact
+and Change Intelligence system.
+
+Your job is to determine whether a knowledge
+section becomes outdated or incorrect because
+of a policy/rule change.
+
+CHANGE:
+
+Title:
+{title}
+
+Old value:
+{old_value}
+
+New value:
+{new_value}
+
+
+KNOWLEDGE SECTION:
+
+Section title:
+{section_title}
+
+Content:
+{content}
+
+
+IMPORTANT RULES:
+
+1. Analyze semantic meaning, not just exact words.
+2. A section can be affected even if it does not
+   contain the exact old value.
+3. Consider dates, deadlines, rules, requirements,
+   procedures and dependencies.
+4. Do not mark a section affected merely because
+   it discusses the same general topic.
+5. If affected, explain the exact relationship.
+6. If affected, produce a corrected version.
+7. Preserve the original meaning and style where possible.
+8. Never invent unrelated policy information.
+
+
+Return ONLY JSON with exactly these fields:
+
+{{
+    "affected": true,
+    "confidence": 0.95,
+    "reason": "The section depends on the changed deadline.",
+    "suggested_fix": "The corrected section text."
+}}
+
+For an unaffected section:
+
+{{
+    "affected": false,
+    "confidence": 0.05,
+    "reason": "The section does not depend on the changed rule.",
+    "suggested_fix": ""
+}}
+
+Confidence must be a number from 0 to 1.
+"""
+
+    try:
+
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                response_mime_type="application/json"
             )
         )
 
-        paragraphs = split_into_paragraphs(text)
+        raw = response.text
 
-        return [
-            {
-                "page_number": 1,
-                "paragraph_number": index,
-                "section_title": detect_section_title(paragraph),
-                "content": paragraph
-            }
-            for index, paragraph in enumerate(
-                paragraphs,
-                start=1
+        if not raw:
+            return None
+
+        result = json.loads(raw)
+
+        affected = bool(
+            result.get(
+                "affected",
+                False
             )
-        ]
+        )
 
-    raise HTTPException(
-        status_code=400,
-        detail="Supported formats: PDF, DOCX, TXT, MD"
+        confidence = float(
+            result.get(
+                "confidence",
+                0
+            )
+        )
+
+        confidence = max(
+            0,
+            min(
+                confidence,
+                1
+            )
+        )
+
+        reason = str(
+            result.get(
+                "reason",
+                ""
+            )
+        )
+
+        suggested_fix = str(
+            result.get(
+                "suggested_fix",
+                ""
+            )
+        )
+
+        return {
+            "affected": affected,
+            "confidence": confidence,
+            "reason": reason,
+            "suggested_fix": suggested_fix
+        }
+
+    except Exception as error:
+
+        print(
+            "Gemini analysis error:",
+            error
+        )
+
+        return None
+
+
+# ============================================================
+# FALLBACK LOCAL ANALYSIS
+# ============================================================
+
+def local_analyze_change(
+    old_value: str,
+    new_value: str,
+    content: str
+):
+
+    content_lower = content.lower()
+
+    old_lower = old_value.lower()
+
+    new_lower = new_value.lower()
+
+    old_words = set(
+        re.findall(
+            r"\b\w+\b",
+            old_lower
+        )
     )
+
+    content_words = set(
+        re.findall(
+            r"\b\w+\b",
+            content_lower
+        )
+    )
+
+    if not old_words:
+
+        return {
+            "affected": False,
+            "confidence": 0.1,
+            "reason": "No meaningful old value was supplied.",
+            "suggested_fix": ""
+        }
+
+    overlap = len(
+        old_words.intersection(
+            content_words
+        )
+    )
+
+    score = overlap / max(
+        len(old_words),
+        1
+    )
+
+    if old_lower in content_lower:
+
+        return {
+            "affected": True,
+            "confidence": 0.88,
+            "reason": (
+                f'The section explicitly references '
+                f'"{old_value}", which has changed.'
+            ),
+            "suggested_fix": content.replace(
+                old_value,
+                new_value
+            )
+        }
+
+    if score >= 0.5:
+
+        return {
+            "affected": True,
+            "confidence": 0.65,
+            "reason": (
+                "The section contains several "
+                "terms related to the changed value."
+            ),
+            "suggested_fix": content
+        }
+
+    return {
+        "affected": False,
+        "confidence": 0.1,
+        "reason": (
+            "No strong dependency on the changed "
+            "value was detected."
+        ),
+        "suggested_fix": ""
+    }
+
+
+# ============================================================
+# ROOT
+# ============================================================
+
+@app.get("/")
+def root():
+
+    return {
+        "name": "RIPPLE",
+        "message": "AI Knowledge Impact & Change Intelligence Platform",
+        "gemini": bool(gemini_client),
+        "model": GEMINI_MODEL
+    }
+
+
+# ============================================================
+# HEALTH
+# ============================================================
+
+@app.get("/health")
+def health():
+
+    return {
+        "status": "healthy",
+        "gemini": bool(gemini_client),
+        "model": GEMINI_MODEL
+    }
 
 
 # ============================================================
@@ -292,7 +664,16 @@ def extract_document(file_path: Path):
 # ============================================================
 
 @app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...)
+):
+
+    if not file.filename:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Filename is required."
+        )
 
     allowed_extensions = [
         ".pdf",
@@ -301,89 +682,103 @@ async def upload_file(file: UploadFile = File(...)):
         ".md"
     ]
 
-    extension = Path(file.filename).suffix.lower()
+    extension = Path(
+        file.filename
+    ).suffix.lower()
 
     if extension not in allowed_extensions:
+
         raise HTTPException(
             status_code=400,
-            detail="Only PDF, DOCX, TXT and MD files are supported."
+            detail=(
+                "Unsupported file type. "
+                "Use PDF, DOCX, TXT or MD."
+            )
         )
 
-    document_id = str(uuid.uuid4())
-
-    safe_filename = (
-        document_id +
-        "_" +
-        Path(file.filename).name
-    )
+    safe_filename = Path(
+        file.filename
+    ).name
 
     file_path = UPLOAD_DIR / safe_filename
 
     with file_path.open("wb") as buffer:
+
         shutil.copyfileobj(
             file.file,
             buffer
         )
 
     try:
-        sections = extract_document(file_path)
+
+        sections = extract_document(
+            file_path
+        )
 
     except Exception as error:
-        file_path.unlink(missing_ok=True)
+
+        file_path.unlink(
+            missing_ok=True
+        )
 
         raise HTTPException(
-            status_code=500,
-            detail=f"Document extraction failed: {error}"
+            status_code=400,
+            detail=f"Could not read document: {error}"
         )
 
     db = get_db()
 
-    db.execute(
+    cursor = db.cursor()
+
+    cursor.execute(
         """
         INSERT INTO documents
-        (id, filename, file_type, file_path)
-        VALUES (?, ?, ?, ?)
+        (filename, file_type)
+        VALUES (?, ?)
         """,
         (
-            document_id,
-            file.filename,
-            file.content_type,
-            str(file_path)
+            safe_filename,
+            file.content_type
         )
     )
 
+    document_id = cursor.lastrowid
+
     for section in sections:
 
-        db.execute(
+        cursor.execute(
             """
             INSERT INTO sections
             (
-                id,
                 document_id,
                 page_number,
                 section_title,
-                paragraph_number,
                 content
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?)
             """,
             (
-                str(uuid.uuid4()),
                 document_id,
-                section["page_number"],
-                section["section_title"],
-                section["paragraph_number"],
-                section["content"]
+                section.get(
+                    "page_number"
+                ),
+                section.get(
+                    "section_title"
+                ),
+                section.get(
+                    "content"
+                )
             )
         )
 
     db.commit()
+
     db.close()
 
     return {
-        "success": True,
+        "message": "Document uploaded and indexed.",
         "document_id": document_id,
-        "filename": file.filename,
+        "filename": safe_filename,
         "sections": len(sections)
     }
 
@@ -397,32 +792,38 @@ def get_documents():
 
     db = get_db()
 
-    documents = db.execute(
+    rows = db.execute(
         """
         SELECT
             d.id,
             d.filename,
             d.file_type,
-            d.created_at,
-            COUNT(s.id) AS sections
+            d.uploaded_at,
+            COUNT(s.id) AS section_count
         FROM documents d
         LEFT JOIN sections s
-        ON d.id = s.document_id
+            ON d.id = s.document_id
         GROUP BY d.id
-        ORDER BY d.created_at DESC
+        ORDER BY d.id DESC
         """
     ).fetchall()
 
     db.close()
 
     return [
-        dict(document)
-        for document in documents
+        dict(row)
+        for row in rows
     ]
 
 
+# ============================================================
+# SINGLE DOCUMENT
+# ============================================================
+
 @app.get("/documents/{document_id}")
-def get_document(document_id: str):
+def get_document(
+    document_id: int
+):
 
     db = get_db()
 
@@ -436,11 +837,12 @@ def get_document(document_id: str):
     ).fetchone()
 
     if not document:
+
         db.close()
 
         raise HTTPException(
             status_code=404,
-            detail="Document not found"
+            detail="Document not found."
         )
 
     sections = db.execute(
@@ -448,7 +850,7 @@ def get_document(document_id: str):
         SELECT *
         FROM sections
         WHERE document_id = ?
-        ORDER BY page_number, paragraph_number
+        ORDER BY id
         """,
         (document_id,)
     ).fetchall()
@@ -465,365 +867,208 @@ def get_document(document_id: str):
 
 
 # ============================================================
-# SIMPLE AI / SEMANTIC IMPACT ENGINE
-# ============================================================
-
-STOP_WORDS = {
-    "the",
-    "and",
-    "for",
-    "with",
-    "that",
-    "this",
-    "from",
-    "into",
-    "must",
-    "shall",
-    "will",
-    "are",
-    "was",
-    "were",
-    "has",
-    "have",
-    "been",
-    "being",
-    "students",
-    "student",
-    "their",
-    "they",
-    "you",
-    "your",
-    "about",
-    "after",
-    "before",
-    "than",
-    "then",
-    "only",
-    "also"
-}
-
-
-def tokenize(text: str):
-
-    words = re.findall(
-        r"[a-zA-Z0-9]+",
-        text.lower()
-    )
-
-    return {
-        word
-        for word in words
-        if len(word) > 2
-        and word not in STOP_WORDS
-    }
-
-
-def calculate_similarity(change_text, section_text):
-
-    change_words = tokenize(change_text)
-    section_words = tokenize(section_text)
-
-    if not change_words or not section_words:
-        return 0
-
-    overlap = change_words.intersection(
-        section_words
-    )
-
-    score = len(overlap) / len(change_words)
-
-    return min(score, 1.0)
-
-
-def explain_impact(
-    old_value,
-    new_value,
-    content
-):
-
-    old_words = tokenize(old_value)
-
-    matched = []
-
-    lower_content = content.lower()
-
-    for word in old_words:
-
-        if word in lower_content:
-            matched.append(word)
-
-    if matched:
-
-        return (
-            "This section appears to depend on the "
-            "previous rule because it references "
-            "related terminology such as: "
-            + ", ".join(matched[:6])
-            + ". The new rule may make this information "
-              "outdated and should be reviewed."
-        )
-
-    return (
-        "This section contains concepts related to "
-        "the requested change. RIPPLE recommends "
-        "human review to determine whether the "
-        "information remains valid."
-    )
-
-
-def generate_fix(
-    old_value,
-    new_value,
-    content
-):
-
-    if old_value.lower() in content.lower():
-
-        return re.sub(
-            re.escape(old_value),
-            new_value,
-            content,
-            flags=re.IGNORECASE
-        )
-
-    return (
-        content
-        + "\n\n"
-        + "[Suggested update: "
-        + new_value
-        + "]"
-    )
-
-
-# ============================================================
-# OPTIONAL LLM
-# ============================================================
-
-def call_external_ai(prompt: str) -> Optional[str]:
-
-    api_key = os.getenv("AI_API_KEY")
-    api_url = os.getenv("AI_API_URL")
-    model = os.getenv("AI_MODEL")
-
-    if not api_key or not api_url:
-        return None
-
-    try:
-
-        response = requests.post(
-            api_url,
-            headers={
-                "Authorization":
-                    f"Bearer {api_key}",
-                "Content-Type":
-                    "application/json"
-            },
-            json={
-                "model": model,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                "temperature": 0.2
-            },
-            timeout=60
-        )
-
-        response.raise_for_status()
-
-        data = response.json()
-
-        return (
-            data
-            .get("choices", [{}])[0]
-            .get("message", {})
-            .get("content")
-        )
-
-    except Exception:
-        return None
-
-
-# ============================================================
-# CREATE CHANGE + ANALYZE IMPACT
+# ANALYZE CHANGE
 # ============================================================
 
 @app.post("/analyze-change")
-def analyze_change(request: ChangeRequest):
+def analyze_change(
+    request: ChangeRequest
+):
 
-    change_id = str(uuid.uuid4())
+    if not request.old_value.strip():
+
+        raise HTTPException(
+            status_code=400,
+            detail="Old value is required."
+        )
+
+    if not request.new_value.strip():
+
+        raise HTTPException(
+            status_code=400,
+            detail="New value is required."
+        )
 
     db = get_db()
 
-    db.execute(
+    cursor = db.cursor()
+
+    cursor.execute(
         """
         INSERT INTO changes
-        (id, title, old_value, new_value)
-        VALUES (?, ?, ?, ?)
+        (title, old_value, new_value)
+        VALUES (?, ?, ?)
         """,
         (
-            change_id,
             request.title,
             request.old_value,
             request.new_value
         )
     )
 
-    sections = db.execute(
+    change_id = cursor.lastrowid
+
+    sections = cursor.execute(
         """
         SELECT
             s.*,
             d.filename
         FROM sections s
         JOIN documents d
-        ON s.document_id = d.id
+            ON s.document_id = d.id
+        ORDER BY s.id
         """
     ).fetchall()
 
-    impacts = []
-
-    change_text = (
-        request.title
-        + " "
-        + request.old_value
-        + " "
-        + request.new_value
-    )
+    results = []
 
     for section in sections:
 
-        similarity = calculate_similarity(
-            change_text,
-            section["content"]
+        ai_result = ai_analyze_change(
+            title=request.title,
+            old_value=request.old_value,
+            new_value=request.new_value,
+            section_title=section[
+                "section_title"
+            ],
+            content=section[
+                "content"
+            ]
         )
 
-        old_match = (
-            request.old_value.lower()
-            in section["content"].lower()
-        )
+        if ai_result:
 
-        if old_match:
-            confidence = 0.95
-
-        elif similarity >= 0.30:
-            confidence = min(
-                0.70 + similarity * 0.5,
-                0.92
-            )
-
-        elif similarity >= 0.15:
-            confidence = 0.55
+            result = ai_result
 
         else:
-            confidence = 0
 
-        if confidence >= 0.55:
-
-            reason = explain_impact(
-                request.old_value,
-                request.new_value,
-                section["content"]
+            result = local_analyze_change(
+                old_value=request.old_value,
+                new_value=request.new_value,
+                content=section[
+                    "content"
+                ]
             )
 
-            suggested_fix = generate_fix(
-                request.old_value,
-                request.new_value,
-                section["content"]
+        cursor.execute(
+            """
+            INSERT INTO impacts
+            (
+                change_id,
+                document_id,
+                section_id,
+                affected,
+                confidence,
+                reason,
+                suggested_fix
             )
-
-            impact_id = str(uuid.uuid4())
-
-            db.execute(
-                """
-                INSERT INTO impacts
-                (
-                    id,
-                    change_id,
-                    section_id,
-                    confidence,
-                    reason,
-                    suggested_fix
-                )
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    impact_id,
-                    change_id,
-                    section["id"],
-                    confidence,
-                    reason,
-                    suggested_fix
-                )
-            )
-
-            impacts.append({
-                "impact_id": impact_id,
-                "section_id": section["id"],
-                "document_id": section["document_id"],
-                "filename": section["filename"],
-                "page_number": section["page_number"],
-                "paragraph_number":
-                    section["paragraph_number"],
-                "section_title":
-                    section["section_title"],
-                "content": section["content"],
-                "confidence": round(
-                    confidence * 100
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                change_id,
+                section["document_id"],
+                section["id"],
+                int(
+                    result["affected"]
                 ),
-                "reason": reason,
-                "suggested_fix": suggested_fix,
+                result["confidence"],
+                result["reason"],
+                result["suggested_fix"]
+            )
+        )
+
+        impact_id = cursor.lastrowid
+
+        results.append(
+            {
+                "id": impact_id,
+                "document_id": section[
+                    "document_id"
+                ],
+                "document_name": section[
+                    "filename"
+                ],
+                "section_id": section[
+                    "id"
+                ],
+                "section_title": section[
+                    "section_title"
+                ],
+                "page_number": section[
+                    "page_number"
+                ],
+                "content": section[
+                    "content"
+                ],
+                "affected": result[
+                    "affected"
+                ],
+                "confidence": result[
+                    "confidence"
+                ],
+                "reason": result[
+                    "reason"
+                ],
+                "suggested_fix": result[
+                    "suggested_fix"
+                ],
                 "status": "pending"
-            })
+            }
+        )
 
     db.commit()
+
     db.close()
 
-    impacts.sort(
-        key=lambda item:
-            item["confidence"],
-        reverse=True
+    affected_count = sum(
+        1
+        for item in results
+        if item["affected"]
     )
 
     return {
         "change_id": change_id,
-        "change": {
-            "title": request.title,
-            "old_value": request.old_value,
-            "new_value": request.new_value
-        },
-        "total_affected": len(impacts),
-        "impacts": impacts
+        "title": request.title,
+        "old_value": request.old_value,
+        "new_value": request.new_value,
+        "ai_engine": (
+            "Gemini"
+            if gemini_client
+            else "Local fallback"
+        ),
+        "total_sections": len(results),
+        "affected_sections": affected_count,
+        "results": results
     }
 
 
 # ============================================================
-# IMPACT RESULTS
+# IMPACTS FOR CHANGE
 # ============================================================
 
 @app.get("/impacts/{change_id}")
-def get_impacts(change_id: str):
+def get_impacts(
+    change_id: int
+):
 
     db = get_db()
 
-    results = db.execute(
+    rows = db.execute(
         """
         SELECT
             i.*,
-            s.document_id,
-            s.page_number,
-            s.paragraph_number,
+            d.filename,
             s.section_title,
-            s.content,
-            d.filename
+            s.page_number,
+            s.content
         FROM impacts i
-        JOIN sections s
-        ON i.section_id = s.id
         JOIN documents d
-        ON s.document_id = d.id
+            ON i.document_id = d.id
+        JOIN sections s
+            ON i.section_id = s.id
         WHERE i.change_id = ?
-        ORDER BY i.confidence DESC
+        ORDER BY i.affected DESC,
+                 i.confidence DESC
         """,
         (change_id,)
     ).fetchall()
@@ -831,8 +1076,8 @@ def get_impacts(change_id: str):
     db.close()
 
     return [
-        dict(result)
-        for result in results
+        dict(row)
+        for row in rows
     ]
 
 
@@ -841,51 +1086,57 @@ def get_impacts(change_id: str):
 # ============================================================
 
 @app.patch("/impacts/{impact_id}")
-def review_impact(
-    impact_id: str,
-    request: ReviewRequest
+def update_impact(
+    impact_id: int,
+    decision: ImpactDecision
 ):
 
-    if request.status not in [
+    allowed = [
         "approved",
         "rejected",
         "pending"
-    ]:
+    ]
+
+    if decision.status not in allowed:
+
         raise HTTPException(
             status_code=400,
-            detail="Invalid review status"
+            detail="Invalid status."
         )
 
     db = get_db()
 
-    cursor = db.execute(
+    cursor = db.cursor()
+
+    cursor.execute(
         """
         UPDATE impacts
         SET status = ?
         WHERE id = ?
         """,
         (
-            request.status,
+            decision.status,
             impact_id
         )
     )
 
-    db.commit()
-
     if cursor.rowcount == 0:
+
         db.close()
 
         raise HTTPException(
             status_code=404,
-            detail="Impact not found"
+            detail="Impact not found."
         )
+
+    db.commit()
 
     db.close()
 
     return {
-        "success": True,
+        "message": "Impact status updated.",
         "impact_id": impact_id,
-        "status": request.status
+        "status": decision.status
     }
 
 
@@ -898,70 +1149,115 @@ def dashboard():
 
     db = get_db()
 
-    document_count = db.execute(
-        "SELECT COUNT(*) FROM documents"
-    ).fetchone()[0]
+    documents = db.execute(
+        "SELECT COUNT(*) AS count FROM documents"
+    ).fetchone()["count"]
 
-    change_count = db.execute(
-        "SELECT COUNT(*) FROM changes"
-    ).fetchone()[0]
+    sections = db.execute(
+        "SELECT COUNT(*) AS count FROM sections"
+    ).fetchone()["count"]
 
-    conflict_count = db.execute(
+    affected = db.execute(
         """
-        SELECT COUNT(*)
+        SELECT COUNT(*) AS count
         FROM impacts
-        WHERE confidence >= 0.85
-        AND status = 'pending'
+        WHERE affected = 1
         """
-    ).fetchone()[0]
+    ).fetchone()["count"]
 
-    review_count = db.execute(
+    pending = db.execute(
         """
-        SELECT COUNT(*)
+        SELECT COUNT(*) AS count
         FROM impacts
         WHERE status = 'pending'
+        AND affected = 1
         """
-    ).fetchone()[0]
+    ).fetchone()["count"]
+
+    approved = db.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM impacts
+        WHERE status = 'approved'
+        """
+    ).fetchone()["count"]
+
+    rejected = db.execute(
+        """
+        SELECT COUNT(*) AS count
+        FROM impacts
+        WHERE status = 'rejected'
+        """
+    ).fetchone()["count"]
 
     db.close()
 
-    health = max(
-        50,
-        100 - conflict_count * 3
-    )
+    if sections:
+
+        health = max(
+            0,
+            round(
+                100 -
+                (
+                    affected /
+                    max(sections, 1)
+                    * 100
+                )
+            )
+        )
+
+    else:
+
+        health = 100
 
     return {
-        "knowledge_sources": document_count,
-        "detected_changes": change_count,
-        "potential_conflicts": conflict_count,
-        "pending_reviews": review_count,
-        "knowledge_health": health
+        "documents": documents,
+        "sections": sections,
+        "affected": affected,
+        "pending": pending,
+        "approved": approved,
+        "rejected": rejected,
+        "health": health,
+        "gemini": bool(gemini_client),
+        "model": GEMINI_MODEL
     }
 
 
 # ============================================================
-# DELETE EVERYTHING
+# RESET
 # ============================================================
 
 @app.delete("/reset")
-def reset_database():
+def reset_data():
 
     db = get_db()
 
-    db.execute("DELETE FROM impacts")
-    db.execute("DELETE FROM changes")
-    db.execute("DELETE FROM sections")
-    db.execute("DELETE FROM documents")
+    db.execute(
+        "DELETE FROM impacts"
+    )
+
+    db.execute(
+        "DELETE FROM changes"
+    )
+
+    db.execute(
+        "DELETE FROM sections"
+    )
+
+    db.execute(
+        "DELETE FROM documents"
+    )
 
     db.commit()
+
     db.close()
 
     for file in UPLOAD_DIR.iterdir():
 
         if file.is_file():
+
             file.unlink()
 
     return {
-        "success": True,
-        "message": "RIPPLE knowledge base reset"
+        "message": "RIPPLE data reset successfully."
     }
