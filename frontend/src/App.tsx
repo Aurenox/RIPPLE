@@ -1,122 +1,218 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import {
+  Activity,
+  AlertTriangle,
+  ArrowUpRight,
+  FileText,
+  GitBranch,
+  ShieldCheck,
+  Upload,
+} from "lucide-react";
+import "./App.css";
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
+    <div className="app">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">R</div>
+          <div>
+            <h1>RIPPLE</h1>
+            <span>Knowledge Intelligence</span>
+          </div>
         </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
 
-      <div className="ticks"></div>
+        <nav>
+          <button className="nav-item active">
+            <Activity size={18} />
+            Dashboard
+          </button>
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+          <button className="nav-item">
+            <FileText size={18} />
+            Knowledge
+          </button>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+          <button className="nav-item">
+            <GitBranch size={18} />
+            Impact Analysis
+          </button>
+
+          <button className="nav-item">
+            <AlertTriangle size={18} />
+            Conflicts
+          </button>
+
+          <button className="nav-item">
+            <ShieldCheck size={18} />
+            Review Queue
+          </button>
+        </nav>
+
+        <div className="sidebar-bottom">
+          <div className="ai-status">
+            <span className="status-dot" />
+            AI Engine Online
+          </div>
+        </div>
+      </aside>
+
+      <main className="main">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">KNOWLEDGE CONTROL CENTER</p>
+            <h2>Good evening.</h2>
+          </div>
+
+          <button className="upload-button">
+            <Upload size={17} />
+            Upload Knowledge
+          </button>
+        </header>
+
+        <section className="hero">
+          <div>
+            <p className="eyebrow">RIPPLE INTELLIGENCE</p>
+            <h3>
+              One change.
+              <br />
+              <span>Every consequence.</span>
+            </h3>
+            <p className="hero-text">
+              Detect outdated knowledge, trace its impact, and repair affected
+              information with AI.
+            </p>
+          </div>
+
+          <div className="health">
+            <div className="health-ring">
+              <strong>92</strong>
+              <span>/100</span>
+            </div>
+            <div>
+              <p>Knowledge Health</p>
+              <small>Excellent consistency</small>
+            </div>
+          </div>
+        </section>
+
+        <section className="stats">
+          <Stat
+            label="Knowledge Sources"
+            value="248"
+            change="+12 this month"
+          />
+          <Stat
+            label="Detected Changes"
+            value="17"
+            change="5 need review"
+          />
+          <Stat
+            label="Potential Conflicts"
+            value="07"
+            change="2 critical"
+          />
+          <Stat
+            label="Pending Reviews"
+            value="12"
+            change="4 high priority"
+          />
+        </section>
+
+        <section className="content-grid">
+          <div className="panel">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">LATEST ACTIVITY</p>
+                <h4>Knowledge changes</h4>
+              </div>
+
+              <button className="text-button">
+                View all <ArrowUpRight size={15} />
+              </button>
+            </div>
+
+            <div className="change">
+              <div className="change-icon danger">!</div>
+              <div className="change-info">
+                <strong>Exam Policy — Deadline changed</strong>
+                <p>Friday → Wednesday</p>
+              </div>
+              <span className="badge danger-badge">5 affected</span>
+            </div>
+
+            <div className="change">
+              <div className="change-icon warning">!</div>
+              <div className="change-info">
+                <strong>Admission Guidelines updated</strong>
+                <p>Verification requirement added</p>
+              </div>
+              <span className="badge warning-badge">3 affected</span>
+            </div>
+
+            <div className="change">
+              <div className="change-icon safe">✓</div>
+              <div className="change-info">
+                <strong>Library Policy reviewed</strong>
+                <p>No downstream conflicts found</p>
+              </div>
+              <span className="badge safe-badge">Clear</span>
+            </div>
+          </div>
+
+          <div className="panel ripple-panel">
+            <p className="eyebrow">ACTIVE RIPPLE</p>
+            <h4>Exam Policy</h4>
+
+            <div className="ripple-graph">
+              <div className="graph-node root">
+                <FileText size={17} />
+                Exam Policy
+              </div>
+
+              <div className="graph-line" />
+
+              <div className="graph-node affected">
+                <FileText size={15} />
+                Student Handbook
+                <span>Page 12</span>
+              </div>
+
+              <div className="graph-line" />
+
+              <div className="graph-node affected">
+                <FileText size={15} />
+                Assignment FAQ
+                <span>Section 4</span>
+              </div>
+            </div>
+
+            <button className="analysis-button">
+              Open Impact Analysis
+              <ArrowUpRight size={16} />
+            </button>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
 }
 
-export default App
+function Stat({
+  label,
+  value,
+  change,
+}: {
+  label: string;
+  value: string;
+  change: string;
+}) {
+  return (
+    <div className="stat-card">
+      <p>{label}</p>
+      <strong>{value}</strong>
+      <span>{change}</span>
+    </div>
+  );
+}
+
+export default App;
