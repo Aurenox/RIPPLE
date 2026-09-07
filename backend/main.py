@@ -4,7 +4,6 @@ import json
 import shutil
 import sqlite3
 from pathlib import Path
-from typing import Optional
 
 import fitz
 from docx import Document as DocxDocument
@@ -19,16 +18,10 @@ from google.genai import types
 
 
 # ============================================================
-# CONFIGURATION
+# CONFIG
 # ============================================================
 
 load_dotenv()
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv(
-    "GEMINI_MODEL",
-    "gemini-2.5-flash"
-)
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -37,23 +30,46 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 
 DATABASE_PATH = BASE_DIR / "ripple.db"
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+GEMINI_MODEL = os.getenv(
+    "GEMINI_MODEL",
+    "gemini-2.5-flash"
+)
+
 
 # ============================================================
-# GEMINI CLIENT
+# GEMINI
 # ============================================================
 
 gemini_client = None
 
 if GEMINI_API_KEY:
+
     try:
+
         gemini_client = genai.Client(
             api_key=GEMINI_API_KEY
         )
-        print("Gemini AI: CONNECTED")
+
+        print("================================")
+        print("RIPPLE GEMINI AI: CONNECTED")
+        print("MODEL:", GEMINI_MODEL)
+        print("================================")
+
     except Exception as error:
-        print("Gemini initialization error:", error)
+
+        print(
+            "Gemini initialization error:",
+            error
+        )
+
 else:
-    print("Gemini AI: API KEY NOT FOUND")
+
+    print("================================")
+    print("WARNING: GEMINI_API_KEY NOT FOUND")
+    print("Using local fallback engine.")
+    print("================================")
 
 
 # ============================================================
@@ -85,13 +101,13 @@ app.add_middleware(
 
 def get_db():
 
-    connection = sqlite3.connect(
+    db = sqlite3.connect(
         DATABASE_PATH
     )
 
-    connection.row_factory = sqlite3.Row
+    db.row_factory = sqlite3.Row
 
-    return connection
+    return db
 
 
 def init_database():
@@ -100,33 +116,29 @@ def init_database():
 
     cursor = db.cursor()
 
-    cursor.execute(
-        """
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS documents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             filename TEXT NOT NULL,
             file_type TEXT,
             uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """
-    )
+    """)
 
-    cursor.execute(
-        """
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS sections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             document_id INTEGER NOT NULL,
             page_number INTEGER,
             section_title TEXT,
             content TEXT NOT NULL,
-            FOREIGN KEY(document_id)
-                REFERENCES documents(id)
-        )
-        """
-    )
 
-    cursor.execute(
-        """
+            FOREIGN KEY(document_id)
+            REFERENCES documents(id)
+        )
+    """)
+
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS changes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT NOT NULL,
@@ -134,33 +146,38 @@ def init_database():
             new_value TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-        """
-    )
+    """)
 
-    cursor.execute(
-        """
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS impacts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             change_id INTEGER NOT NULL,
             document_id INTEGER NOT NULL,
             section_id INTEGER NOT NULL,
+
             affected INTEGER NOT NULL,
             confidence REAL NOT NULL,
+
             reason TEXT,
             suggested_fix TEXT,
+
             status TEXT DEFAULT 'pending',
+
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
             FOREIGN KEY(change_id)
-                REFERENCES changes(id),
+            REFERENCES changes(id),
+
             FOREIGN KEY(document_id)
-                REFERENCES documents(id),
+            REFERENCES documents(id),
+
             FOREIGN KEY(section_id)
-                REFERENCES sections(id)
+            REFERENCES sections(id)
         )
-        """
-    )
+    """)
 
     db.commit()
+
     db.close()
 
 
@@ -184,12 +201,17 @@ class ImpactDecision(BaseModel):
 
 
 # ============================================================
-# TEXT EXTRACTION
+# TEXT CLEANING
 # ============================================================
 
-def clean_text(text: str) -> str:
+def clean_text(
+    text: str
+):
 
-    text = text.replace("\x00", " ")
+    text = text.replace(
+        "\x00",
+        " "
+    )
 
     text = re.sub(
         r"[ \t]+",
@@ -206,7 +228,9 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-def detect_title(text: str) -> str:
+def detect_title(
+    text: str
+):
 
     lines = [
         line.strip()
@@ -215,44 +239,47 @@ def detect_title(text: str) -> str:
     ]
 
     if not lines:
+
         return "Untitled Section"
 
-    first_line = lines[0]
+    if len(lines[0]) <= 100:
 
-    if len(first_line) <= 100:
-        return first_line
+        return lines[0]
 
     return "Knowledge Section"
 
 
 # ============================================================
-# PDF EXTRACTION
+# PDF
 # ============================================================
 
-def extract_pdf(file_path: Path):
+def extract_pdf(
+    file_path: Path
+):
 
     sections = []
 
-    pdf = fitz.open(file_path)
+    pdf = fitz.open(
+        file_path
+    )
 
-    for page_index, page in enumerate(pdf):
+    for index, page in enumerate(pdf):
 
-        text = page.get_text()
-
-        text = clean_text(text)
+        text = clean_text(
+            page.get_text()
+        )
 
         if not text:
+
             continue
 
-        title = detect_title(text)
-
-        sections.append(
-            {
-                "page_number": page_index + 1,
-                "section_title": title,
-                "content": text
-            }
-        )
+        sections.append({
+            "page_number": index + 1,
+            "section_title": detect_title(
+                text
+            ),
+            "content": text
+        })
 
     pdf.close()
 
@@ -260,10 +287,12 @@ def extract_pdf(file_path: Path):
 
 
 # ============================================================
-# DOCX EXTRACTION
+# DOCX
 # ============================================================
 
-def extract_docx(file_path: Path):
+def extract_docx(
+    file_path: Path
+):
 
     document = DocxDocument(
         file_path
@@ -271,76 +300,86 @@ def extract_docx(file_path: Path):
 
     sections = []
 
-    current_text = []
     current_title = "Document Section"
+
+    current_content = []
 
     for paragraph in document.paragraphs:
 
         text = paragraph.text.strip()
 
         if not text:
+
             continue
 
-        if (
-            paragraph.style
-            and paragraph.style.name
-            and "Heading" in paragraph.style.name
-        ):
+        style_name = ""
 
-            if current_text:
+        if paragraph.style:
 
-                sections.append(
-                    {
-                        "page_number": None,
-                        "section_title": current_title,
-                        "content": "\n".join(
-                            current_text
-                        )
-                    }
-                )
+            style_name = (
+                paragraph.style.name or ""
+            )
+
+        if "Heading" in style_name:
+
+            if current_content:
+
+                sections.append({
+                    "page_number": None,
+                    "section_title": current_title,
+                    "content": "\n".join(
+                        current_content
+                    )
+                })
 
             current_title = text
-            current_text = []
+
+            current_content = []
 
         else:
 
-            current_text.append(text)
+            current_content.append(
+                text
+            )
 
-    if current_text:
+    if current_content:
 
-        sections.append(
-            {
-                "page_number": None,
-                "section_title": current_title,
-                "content": "\n".join(
-                    current_text
-                )
-            }
-        )
+        sections.append({
+            "page_number": None,
+            "section_title": current_title,
+            "content": "\n".join(
+                current_content
+            )
+        })
 
     return sections
 
 
 # ============================================================
-# TXT / MD EXTRACTION
+# TXT / MD
 # ============================================================
 
-def extract_text_file(file_path: Path):
+def extract_text_file(
+    file_path: Path
+):
 
     text = file_path.read_text(
         encoding="utf-8",
         errors="ignore"
     )
 
-    text = clean_text(text)
+    text = clean_text(
+        text
+    )
 
     if not text:
+
         return []
 
     paragraphs = [
-        p.strip()
-        for p in text.split("\n\n")
-        if p.strip()
+        item.strip()
+        for item in text.split("\n\n")
+        if item.strip()
     ]
 
     sections = []
@@ -349,44 +388,50 @@ def extract_text_file(file_path: Path):
         paragraphs
     ):
 
-        sections.append(
-            {
-                "page_number": index + 1,
-                "section_title": detect_title(
-                    paragraph
-                ),
-                "content": paragraph
-            }
-        )
+        sections.append({
+            "page_number": index + 1,
+            "section_title": detect_title(
+                paragraph
+            ),
+            "content": paragraph
+        })
 
     return sections
 
 
 # ============================================================
-# UNIVERSAL EXTRACTION
+# DOCUMENT EXTRACTION
 # ============================================================
 
-def extract_document(file_path: Path):
+def extract_document(
+    file_path: Path
+):
 
     extension = file_path.suffix.lower()
 
     if extension == ".pdf":
 
-        return extract_pdf(file_path)
+        return extract_pdf(
+            file_path
+        )
 
     if extension == ".docx":
 
-        return extract_docx(file_path)
+        return extract_docx(
+            file_path
+        )
 
-    if extension in [".txt", ".md"]:
+    if extension in [
+        ".txt",
+        ".md"
+    ]:
 
         return extract_text_file(
             file_path
         )
 
     raise ValueError(
-        "Unsupported file type. "
-        "Use PDF, DOCX, TXT or MD."
+        "Unsupported file type."
     )
 
 
@@ -407,68 +452,67 @@ def ai_analyze_change(
         return None
 
     prompt = f"""
-You are RIPPLE, an AI Knowledge Impact
-and Change Intelligence system.
+You are RIPPLE.
 
-Your job is to determine whether a knowledge
-section becomes outdated or incorrect because
-of a policy/rule change.
+RIPPLE is an AI Knowledge Impact and
+Change Intelligence system.
 
-CHANGE:
+A rule or policy has changed.
 
-Title:
+Your task is to determine whether a
+specific knowledge section is affected
+by that change.
+
+CHANGE TITLE:
 {title}
 
-Old value:
+OLD VALUE:
 {old_value}
 
-New value:
+NEW VALUE:
 {new_value}
 
-
-KNOWLEDGE SECTION:
-
-Section title:
+SECTION TITLE:
 {section_title}
 
-Content:
+SECTION CONTENT:
 {content}
 
+Analyze the semantic dependency.
 
-IMPORTANT RULES:
+IMPORTANT:
 
-1. Analyze semantic meaning, not just exact words.
-2. A section can be affected even if it does not
-   contain the exact old value.
-3. Consider dates, deadlines, rules, requirements,
-   procedures and dependencies.
-4. Do not mark a section affected merely because
-   it discusses the same general topic.
-5. If affected, explain the exact relationship.
-6. If affected, produce a corrected version.
-7. Preserve the original meaning and style where possible.
-8. Never invent unrelated policy information.
+- Do not rely only on exact keyword matching.
+- Understand the meaning of the section.
+- The section may be affected even when
+  the exact old value is not present.
+- Consider dates, deadlines, rules,
+  procedures, requirements and dependencies.
+- Do not mark unrelated sections as affected.
+- If affected, explain exactly why.
+- If affected, generate a corrected version.
+- Preserve the original writing style.
+- Do not invent unrelated information.
 
-
-Return ONLY JSON with exactly these fields:
+Return ONLY valid JSON:
 
 {{
     "affected": true,
     "confidence": 0.95,
-    "reason": "The section depends on the changed deadline.",
-    "suggested_fix": "The corrected section text."
+    "reason": "Explain exactly why this section is affected.",
+    "suggested_fix": "Corrected version of the section."
 }}
 
-For an unaffected section:
+OR:
 
 {{
     "affected": false,
     "confidence": 0.05,
-    "reason": "The section does not depend on the changed rule.",
+    "reason": "Explain why this section is not affected.",
     "suggested_fix": ""
 }}
 
-Confidence must be a number from 0 to 1.
+Confidence must be between 0 and 1.
 """
 
     try:
@@ -482,18 +526,12 @@ Confidence must be a number from 0 to 1.
             )
         )
 
-        raw = response.text
+        if not response.text:
 
-        if not raw:
             return None
 
-        result = json.loads(raw)
-
-        affected = bool(
-            result.get(
-                "affected",
-                False
-            )
+        result = json.loads(
+            response.text
         )
 
         confidence = float(
@@ -506,30 +544,31 @@ Confidence must be a number from 0 to 1.
         confidence = max(
             0,
             min(
-                confidence,
-                1
-            )
-        )
-
-        reason = str(
-            result.get(
-                "reason",
-                ""
-            )
-        )
-
-        suggested_fix = str(
-            result.get(
-                "suggested_fix",
-                ""
+                1,
+                confidence
             )
         )
 
         return {
-            "affected": affected,
+            "affected": bool(
+                result.get(
+                    "affected",
+                    False
+                )
+            ),
             "confidence": confidence,
-            "reason": reason,
-            "suggested_fix": suggested_fix
+            "reason": str(
+                result.get(
+                    "reason",
+                    ""
+                )
+            ),
+            "suggested_fix": str(
+                result.get(
+                    "suggested_fix",
+                    ""
+                )
+            )
         }
 
     except Exception as error:
@@ -543,7 +582,7 @@ Confidence must be a number from 0 to 1.
 
 
 # ============================================================
-# FALLBACK LOCAL ANALYSIS
+# LOCAL FALLBACK
 # ============================================================
 
 def local_analyze_change(
@@ -556,7 +595,20 @@ def local_analyze_change(
 
     old_lower = old_value.lower()
 
-    new_lower = new_value.lower()
+    if old_lower in content_lower:
+
+        return {
+            "affected": True,
+            "confidence": 0.88,
+            "reason": (
+                f'This section explicitly references '
+                f'"{old_value}", which has changed.'
+            ),
+            "suggested_fix": content.replace(
+                old_value,
+                new_value
+            )
+        }
 
     old_words = set(
         re.findall(
@@ -577,7 +629,7 @@ def local_analyze_change(
         return {
             "affected": False,
             "confidence": 0.1,
-            "reason": "No meaningful old value was supplied.",
+            "reason": "No meaningful old value.",
             "suggested_fix": ""
         }
 
@@ -587,25 +639,9 @@ def local_analyze_change(
         )
     )
 
-    score = overlap / max(
-        len(old_words),
-        1
+    score = overlap / len(
+        old_words
     )
-
-    if old_lower in content_lower:
-
-        return {
-            "affected": True,
-            "confidence": 0.88,
-            "reason": (
-                f'The section explicitly references '
-                f'"{old_value}", which has changed.'
-            ),
-            "suggested_fix": content.replace(
-                old_value,
-                new_value
-            )
-        }
 
     if score >= 0.5:
 
@@ -613,8 +649,8 @@ def local_analyze_change(
             "affected": True,
             "confidence": 0.65,
             "reason": (
-                "The section contains several "
-                "terms related to the changed value."
+                "Several terms related to the "
+                "changed value appear in this section."
             ),
             "suggested_fix": content
         }
@@ -639,8 +675,13 @@ def root():
 
     return {
         "name": "RIPPLE",
-        "message": "AI Knowledge Impact & Change Intelligence Platform",
-        "gemini": bool(gemini_client),
+        "message": (
+            "AI Knowledge Impact "
+            "& Change Intelligence Platform"
+        ),
+        "gemini": bool(
+            gemini_client
+        ),
         "model": GEMINI_MODEL
     }
 
@@ -654,7 +695,9 @@ def health():
 
     return {
         "status": "healthy",
-        "gemini": bool(gemini_client),
+        "gemini": bool(
+            gemini_client
+        ),
         "model": GEMINI_MODEL
     }
 
@@ -675,7 +718,7 @@ async def upload_file(
             detail="Filename is required."
         )
 
-    allowed_extensions = [
+    allowed = [
         ".pdf",
         ".docx",
         ".txt",
@@ -686,23 +729,27 @@ async def upload_file(
         file.filename
     ).suffix.lower()
 
-    if extension not in allowed_extensions:
+    if extension not in allowed:
 
         raise HTTPException(
             status_code=400,
             detail=(
-                "Unsupported file type. "
                 "Use PDF, DOCX, TXT or MD."
             )
         )
 
-    safe_filename = Path(
+    filename = Path(
         file.filename
     ).name
 
-    file_path = UPLOAD_DIR / safe_filename
+    file_path = (
+        UPLOAD_DIR /
+        filename
+    )
 
-    with file_path.open("wb") as buffer:
+    with file_path.open(
+        "wb"
+    ) as buffer:
 
         shutil.copyfileobj(
             file.file,
@@ -723,7 +770,7 @@ async def upload_file(
 
         raise HTTPException(
             status_code=400,
-            detail=f"Could not read document: {error}"
+            detail=str(error)
         )
 
     db = get_db()
@@ -737,7 +784,7 @@ async def upload_file(
         VALUES (?, ?)
         """,
         (
-            safe_filename,
+            filename,
             file.content_type
         )
     )
@@ -759,15 +806,9 @@ async def upload_file(
             """,
             (
                 document_id,
-                section.get(
-                    "page_number"
-                ),
-                section.get(
-                    "section_title"
-                ),
-                section.get(
-                    "content"
-                )
+                section["page_number"],
+                section["section_title"],
+                section["content"]
             )
         )
 
@@ -776,10 +817,14 @@ async def upload_file(
     db.close()
 
     return {
-        "message": "Document uploaded and indexed.",
+        "message": (
+            "Document uploaded and indexed."
+        ),
         "document_id": document_id,
-        "filename": safe_filename,
-        "sections": len(sections)
+        "filename": filename,
+        "sections": len(
+            sections
+        )
     }
 
 
@@ -817,7 +862,7 @@ def get_documents():
 
 
 # ============================================================
-# SINGLE DOCUMENT
+# DOCUMENT
 # ============================================================
 
 @app.get("/documents/{document_id}")
@@ -833,7 +878,9 @@ def get_document(
         FROM documents
         WHERE id = ?
         """,
-        (document_id,)
+        (
+            document_id,
+        )
     ).fetchone()
 
     if not document:
@@ -852,13 +899,17 @@ def get_document(
         WHERE document_id = ?
         ORDER BY id
         """,
-        (document_id,)
+        (
+            document_id,
+        )
     ).fetchall()
 
     db.close()
 
     return {
-        "document": dict(document),
+        "document": dict(
+            document
+        ),
         "sections": [
             dict(section)
             for section in sections
@@ -896,7 +947,11 @@ def analyze_change(
     cursor.execute(
         """
         INSERT INTO changes
-        (title, old_value, new_value)
+        (
+            title,
+            old_value,
+            new_value
+        )
         VALUES (?, ?, ?)
         """,
         (
@@ -979,42 +1034,42 @@ def analyze_change(
 
         impact_id = cursor.lastrowid
 
-        results.append(
-            {
-                "id": impact_id,
-                "document_id": section[
-                    "document_id"
-                ],
-                "document_name": section[
-                    "filename"
-                ],
-                "section_id": section[
-                    "id"
-                ],
-                "section_title": section[
-                    "section_title"
-                ],
-                "page_number": section[
-                    "page_number"
-                ],
-                "content": section[
-                    "content"
-                ],
-                "affected": result[
-                    "affected"
-                ],
-                "confidence": result[
-                    "confidence"
-                ],
-                "reason": result[
-                    "reason"
-                ],
-                "suggested_fix": result[
-                    "suggested_fix"
-                ],
-                "status": "pending"
-            }
-        )
+        results.append({
+            "id": impact_id,
+
+            "document_id":
+                section["document_id"],
+
+            "document_name":
+                section["filename"],
+
+            "section_id":
+                section["id"],
+
+            "section_title":
+                section["section_title"],
+
+            "page_number":
+                section["page_number"],
+
+            "content":
+                section["content"],
+
+            "affected":
+                result["affected"],
+
+            "confidence":
+                result["confidence"],
+
+            "reason":
+                result["reason"],
+
+            "suggested_fix":
+                result["suggested_fix"],
+
+            "status":
+                "pending"
+        })
 
     db.commit()
 
@@ -1022,8 +1077,8 @@ def analyze_change(
 
     affected_count = sum(
         1
-        for item in results
-        if item["affected"]
+        for result in results
+        if result["affected"]
     )
 
     return {
@@ -1031,19 +1086,26 @@ def analyze_change(
         "title": request.title,
         "old_value": request.old_value,
         "new_value": request.new_value,
+
         "ai_engine": (
             "Gemini"
             if gemini_client
             else "Local fallback"
         ),
-        "total_sections": len(results),
-        "affected_sections": affected_count,
-        "results": results
+
+        "total_sections":
+            len(results),
+
+        "affected_sections":
+            affected_count,
+
+        "results":
+            results
     }
 
 
 # ============================================================
-# IMPACTS FOR CHANGE
+# IMPACTS
 # ============================================================
 
 @app.get("/impacts/{change_id}")
@@ -1062,15 +1124,22 @@ def get_impacts(
             s.page_number,
             s.content
         FROM impacts i
+
         JOIN documents d
             ON i.document_id = d.id
+
         JOIN sections s
             ON i.section_id = s.id
+
         WHERE i.change_id = ?
-        ORDER BY i.affected DESC,
-                 i.confidence DESC
+
+        ORDER BY
+            i.affected DESC,
+            i.confidence DESC
         """,
-        (change_id,)
+        (
+            change_id,
+        )
     ).fetchall()
 
     db.close()
@@ -1134,9 +1203,14 @@ def update_impact(
     db.close()
 
     return {
-        "message": "Impact status updated.",
-        "impact_id": impact_id,
-        "status": decision.status
+        "message":
+            "Impact status updated.",
+
+        "impact_id":
+            impact_id,
+
+        "status":
+            decision.status
     }
 
 
@@ -1150,11 +1224,17 @@ def dashboard():
     db = get_db()
 
     documents = db.execute(
-        "SELECT COUNT(*) AS count FROM documents"
+        """
+        SELECT COUNT(*) AS count
+        FROM documents
+        """
     ).fetchone()["count"]
 
     sections = db.execute(
-        "SELECT COUNT(*) AS count FROM sections"
+        """
+        SELECT COUNT(*) AS count
+        FROM sections
+        """
     ).fetchone()["count"]
 
     affected = db.execute(
@@ -1169,8 +1249,8 @@ def dashboard():
         """
         SELECT COUNT(*) AS count
         FROM impacts
-        WHERE status = 'pending'
-        AND affected = 1
+        WHERE affected = 1
+        AND status = 'pending'
         """
     ).fetchone()["count"]
 
@@ -1200,8 +1280,8 @@ def dashboard():
                 100 -
                 (
                     affected /
-                    max(sections, 1)
-                    * 100
+                    sections *
+                    100
                 )
             )
         )
@@ -1211,15 +1291,32 @@ def dashboard():
         health = 100
 
     return {
-        "documents": documents,
-        "sections": sections,
-        "affected": affected,
-        "pending": pending,
-        "approved": approved,
-        "rejected": rejected,
-        "health": health,
-        "gemini": bool(gemini_client),
-        "model": GEMINI_MODEL
+        "documents":
+            documents,
+
+        "sections":
+            sections,
+
+        "affected":
+            affected,
+
+        "pending":
+            pending,
+
+        "approved":
+            approved,
+
+        "rejected":
+            rejected,
+
+        "health":
+            health,
+
+        "gemini":
+            bool(gemini_client),
+
+        "model":
+            GEMINI_MODEL
     }
 
 
@@ -1259,5 +1356,6 @@ def reset_data():
             file.unlink()
 
     return {
-        "message": "RIPPLE data reset successfully."
+        "message":
+            "RIPPLE workspace reset."
     }

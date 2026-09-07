@@ -4,6 +4,19 @@ import {
 } from "react";
 
 import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  Handle,
+  Position,
+  type Node,
+  type Edge
+} from "@xyflow/react";
+
+import "@xyflow/react/dist/style.css";
+
+import {
   Activity,
   AlertTriangle,
   Check,
@@ -12,7 +25,6 @@ import {
   FileText,
   GitBranch,
   LayoutDashboard,
-  Menu,
   Network,
   RefreshCw,
   Search,
@@ -26,7 +38,8 @@ import {
 import "./App.css";
 
 
-const API = "http://127.0.0.1:8000";
+const API =
+  "http://127.0.0.1:8000";
 
 
 type DocumentItem = {
@@ -121,11 +134,13 @@ function App() {
 
     try {
 
-      const response = await fetch(
-        `${API}/dashboard`
-      );
+      const response =
+        await fetch(
+          `${API}/dashboard`
+        );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       setDashboard(data);
 
@@ -142,11 +157,13 @@ function App() {
 
     try {
 
-      const response = await fetch(
-        `${API}/documents`
-      );
+      const response =
+        await fetch(
+          `${API}/documents`
+        );
 
-      const data = await response.json();
+      const data =
+        await response.json();
 
       setDocuments(data);
 
@@ -185,7 +202,10 @@ function App() {
     if (!file) return;
 
     setUploading(true);
-    setMessage("Uploading and indexing...");
+
+    setMessage(
+      "Uploading and indexing..."
+    );
 
     const formData =
       new FormData();
@@ -213,7 +233,7 @@ function App() {
 
         throw new Error(
           data.detail ||
-          "Upload failed"
+          "Upload failed."
         );
       }
 
@@ -234,6 +254,7 @@ function App() {
     } finally {
 
       setUploading(false);
+
       event.target.value = "";
     }
   }
@@ -253,12 +274,12 @@ function App() {
       const data =
         await response.json();
 
-      setSelectedDocument(
-        {
-          document: data.document,
-          sections: data.sections
-        }
-      );
+      setSelectedDocument({
+        document:
+          data.document,
+        sections:
+          data.sections
+      });
 
       setActiveView(
         "knowledge"
@@ -275,24 +296,28 @@ function App() {
 
   async function analyzeChange() {
 
-    if (!oldValue.trim() ||
-        !newValue.trim()) {
+    if (
+      !oldValue.trim() ||
+      !newValue.trim()
+    ) {
 
       setMessage(
-        "Enter both old and new values."
+        "Enter old and new values."
       );
 
       return;
     }
 
     setLoading(true);
+
     setImpacts([]);
+
     setActiveView(
       "impact"
     );
 
     setMessage(
-      "Gemini is analyzing the knowledge graph..."
+      "Gemini is analyzing your knowledge base..."
     );
 
     try {
@@ -302,17 +327,22 @@ function App() {
           `${API}/analyze-change`,
           {
             method: "POST",
+
             headers: {
               "Content-Type":
                 "application/json"
             },
-            body: JSON.stringify(
-              {
-                title: changeTitle,
-                old_value: oldValue,
-                new_value: newValue
-              }
-            )
+
+            body: JSON.stringify({
+              title:
+                changeTitle,
+
+              old_value:
+                oldValue,
+
+              new_value:
+                newValue
+            })
           }
         );
 
@@ -364,13 +394,15 @@ function App() {
           `${API}/impacts/${id}`,
           {
             method: "PATCH",
+
             headers: {
               "Content-Type":
                 "application/json"
             },
-            body: JSON.stringify(
-              { status }
-            )
+
+            body: JSON.stringify({
+              status
+            })
           }
         );
 
@@ -409,7 +441,7 @@ function App() {
 
     const confirmed =
       window.confirm(
-        "Delete all RIPPLE documents and analysis data?"
+        "Delete all RIPPLE data?"
       );
 
     if (!confirmed) return;
@@ -421,20 +453,23 @@ function App() {
       }
     );
 
-    setSelectedDocument(null);
+    setSelectedDocument(
+      null
+    );
+
     setImpacts([]);
 
     await refresh();
 
     setMessage(
-      "RIPPLE workspace reset."
+      "Workspace reset."
     );
   }
 
 
   const affectedImpacts =
     impacts.filter(
-      impact => impact.affected
+      item => item.affected
     );
 
 
@@ -452,6 +487,7 @@ function App() {
           </div>
 
           <div>
+
             <div className="brand-name">
               RIPPLE
             </div>
@@ -459,6 +495,7 @@ function App() {
             <div className="brand-sub">
               KNOWLEDGE INTELLIGENCE
             </div>
+
           </div>
 
         </div>
@@ -467,7 +504,11 @@ function App() {
         <nav className="nav">
 
           <NavItem
-            icon={<LayoutDashboard size={18} />}
+            icon={
+              <LayoutDashboard
+                size={18}
+              />
+            }
             label="Dashboard"
             active={
               activeView === "dashboard"
@@ -480,7 +521,9 @@ function App() {
           />
 
           <NavItem
-            icon={<FileText size={18} />}
+            icon={
+              <FileText size={18} />
+            }
             label="Knowledge"
             active={
               activeView === "knowledge"
@@ -493,7 +536,9 @@ function App() {
           />
 
           <NavItem
-            icon={<Network size={18} />}
+            icon={
+              <Network size={18} />
+            }
             label="Impact Analysis"
             active={
               activeView === "impact"
@@ -506,7 +551,11 @@ function App() {
           />
 
           <NavItem
-            icon={<AlertTriangle size={18} />}
+            icon={
+              <AlertTriangle
+                size={18}
+              />
+            }
             label="Conflicts"
             active={
               activeView === "conflicts"
@@ -519,7 +568,11 @@ function App() {
           />
 
           <NavItem
-            icon={<CheckCircle2 size={18} />}
+            icon={
+              <CheckCircle2
+                size={18}
+              />
+            }
             label="Review Queue"
             active={
               activeView === "review"
@@ -541,6 +594,7 @@ function App() {
             <span className="status-dot" />
 
             <div>
+
               <strong>
                 AI Engine
               </strong>
@@ -550,13 +604,17 @@ function App() {
                   ? "Gemini Online"
                   : "Fallback Mode"}
               </small>
+
             </div>
 
           </div>
 
+
           <button
             className="reset-button"
-            onClick={resetData}
+            onClick={
+              resetData
+            }
           >
             Reset Workspace
           </button>
@@ -579,13 +637,17 @@ function App() {
             </div>
 
             <h1>
-              {activeView === "dashboard"
+              {activeView ===
+              "dashboard"
                 ? "Dashboard"
-                : activeView === "knowledge"
+                : activeView ===
+                  "knowledge"
                 ? "Knowledge Base"
-                : activeView === "impact"
+                : activeView ===
+                  "impact"
                 ? "Impact Analysis"
-                : activeView === "review"
+                : activeView ===
+                  "review"
                 ? "Review Queue"
                 : "Conflict Detection"}
             </h1>
@@ -597,14 +659,21 @@ function App() {
 
             <button
               className="icon-button"
-              onClick={refresh}
+              onClick={
+                refresh
+              }
             >
-              <RefreshCw size={17} />
+              <RefreshCw
+                size={17}
+              />
             </button>
+
 
             <label className="upload-button">
 
-              <Upload size={17} />
+              <Upload
+                size={17}
+              />
 
               {uploading
                 ? "Indexing..."
@@ -630,7 +699,9 @@ function App() {
 
           <div className="message">
 
-            <Sparkles size={16} />
+            <Sparkles
+              size={16}
+            />
 
             {message}
 
@@ -639,9 +710,12 @@ function App() {
         )}
 
 
-        {/* DASHBOARD */}
+        {/* =================================================
+            DASHBOARD
+        ================================================= */}
 
-        {activeView === "dashboard" && (
+        {activeView ===
+          "dashboard" && (
 
           <>
 
@@ -660,12 +734,12 @@ function App() {
                 </h2>
 
                 <p>
-                  RIPPLE maps how knowledge
-                  is connected, detects
+                  RIPPLE maps connected
+                  knowledge, detects
                   downstream impact and
                   proposes safe updates
-                  before outdated information
-                  spreads.
+                  before outdated
+                  information spreads.
                 </p>
 
                 <button
@@ -677,7 +751,10 @@ function App() {
                   }
                 >
                   Open Impact Analysis
-                  <ChevronRight size={17} />
+
+                  <ChevronRight
+                    size={17}
+                  />
                 </button>
 
               </div>
@@ -693,27 +770,34 @@ function App() {
               <Stat
                 label="Knowledge Assets"
                 value={
-                  dashboard?.documents ?? 0
+                  dashboard?.documents ??
+                  0
                 }
                 icon={
-                  <FileText size={18} />
+                  <FileText
+                    size={18}
+                  />
                 }
               />
 
               <Stat
                 label="Indexed Sections"
                 value={
-                  dashboard?.sections ?? 0
+                  dashboard?.sections ??
+                  0
                 }
                 icon={
-                  <Network size={18} />
+                  <Network
+                    size={18}
+                  />
                 }
               />
 
               <Stat
                 label="Affected"
                 value={
-                  dashboard?.affected ?? 0
+                  dashboard?.affected ??
+                  0
                 }
                 icon={
                   <AlertTriangle
@@ -725,10 +809,13 @@ function App() {
               <Stat
                 label="Pending Review"
                 value={
-                  dashboard?.pending ?? 0
+                  dashboard?.pending ??
+                  0
                 }
                 icon={
-                  <Activity size={18} />
+                  <Activity
+                    size={18}
+                  />
                 }
               />
 
@@ -742,6 +829,7 @@ function App() {
                 <div className="panel-heading">
 
                   <div>
+
                     <span className="section-kicker">
                       KNOWLEDGE HEALTH
                     </span>
@@ -749,9 +837,12 @@ function App() {
                     <h3>
                       Workspace Integrity
                     </h3>
+
                   </div>
 
-                  <ShieldCheck size={22} />
+                  <ShieldCheck
+                    size={22}
+                  />
 
                 </div>
 
@@ -759,10 +850,14 @@ function App() {
                 <div className="health">
 
                   <div className="health-score">
-                    {dashboard?.health ?? 100}%
+
+                    {dashboard?.health ??
+                      100}%
+
                   </div>
 
                   <div className="health-copy">
+
                     <strong>
                       Knowledge health
                     </strong>
@@ -771,6 +866,7 @@ function App() {
                       Based on detected
                       downstream changes
                     </span>
+
                   </div>
 
                 </div>
@@ -780,9 +876,11 @@ function App() {
 
                   <div
                     style={{
-                      width: `${
-                        dashboard?.health ?? 100
-                      }%`
+                      width:
+                        `${
+                          dashboard?.health ??
+                          100
+                        }%`
                     }}
                   />
 
@@ -796,16 +894,20 @@ function App() {
                 <div className="panel-heading">
 
                   <div>
+
                     <span className="section-kicker">
-                      LATEST ACTIVITY
+                      SYSTEM ACTIVITY
                     </span>
 
                     <h3>
-                      System Overview
+                      Overview
                     </h3>
+
                   </div>
 
-                  <Activity size={22} />
+                  <Activity
+                    size={22}
+                  />
 
                 </div>
 
@@ -815,28 +917,32 @@ function App() {
                   <ActivityRow
                     label="Documents indexed"
                     value={
-                      dashboard?.documents ?? 0
+                      dashboard?.documents ??
+                      0
                     }
                   />
 
                   <ActivityRow
                     label="Sections analyzed"
                     value={
-                      dashboard?.sections ?? 0
+                      dashboard?.sections ??
+                      0
                     }
                   />
 
                   <ActivityRow
                     label="Impact candidates"
                     value={
-                      dashboard?.affected ?? 0
+                      dashboard?.affected ??
+                      0
                     }
                   />
 
                   <ActivityRow
                     label="Approved fixes"
                     value={
-                      dashboard?.approved ?? 0
+                      dashboard?.approved ??
+                      0
                     }
                   />
 
@@ -850,9 +956,12 @@ function App() {
         )}
 
 
-        {/* KNOWLEDGE */}
+        {/* =================================================
+            KNOWLEDGE
+        ================================================= */}
 
-        {activeView === "knowledge" && (
+        {activeView ===
+          "knowledge" && (
 
           <section className="knowledge-layout">
 
@@ -861,6 +970,7 @@ function App() {
               <div className="panel-heading">
 
                 <div>
+
                   <span className="section-kicker">
                     KNOWLEDGE REPOSITORY
                   </span>
@@ -868,28 +978,34 @@ function App() {
                   <h3>
                     Indexed Documents
                   </h3>
+
                 </div>
 
-                <Search size={20} />
+                <Search
+                  size={20}
+                />
 
               </div>
 
 
               <div className="document-list">
 
-                {documents.length === 0 && (
+                {documents.length ===
+                  0 && (
 
                   <div className="empty">
 
-                    <FileText size={30} />
+                    <FileText
+                      size={30}
+                    />
 
                     <strong>
                       No knowledge uploaded
                     </strong>
 
                     <span>
-                      Upload a PDF, DOCX, TXT
-                      or Markdown document.
+                      Upload PDF, DOCX,
+                      TXT or Markdown.
                     </span>
 
                   </div>
@@ -913,13 +1029,20 @@ function App() {
                     >
 
                       <div className="file-icon">
-                        <FileText size={19} />
+
+                        <FileText
+                          size={19}
+                        />
+
                       </div>
+
 
                       <div className="document-info">
 
                         <strong>
-                          {document.filename}
+                          {
+                            document.filename
+                          }
                         </strong>
 
                         <span>
@@ -929,6 +1052,7 @@ function App() {
                         </span>
 
                       </div>
+
 
                       <ChevronRight
                         size={17}
@@ -951,17 +1075,21 @@ function App() {
                 <div className="panel-heading">
 
                   <div>
+
                     <span className="section-kicker">
                       DOCUMENT VIEWER
                     </span>
 
                     <h3>
                       {
-                        selectedDocument.document
+                        selectedDocument
+                          .document
                           .filename
                       }
                     </h3>
+
                   </div>
+
 
                   <button
                     className="icon-button"
@@ -971,42 +1099,59 @@ function App() {
                       )
                     }
                   >
-                    <X size={17} />
+
+                    <X
+                      size={17}
+                    />
+
                   </button>
 
                 </div>
 
 
-                {selectedDocument.sections.map(
-                  section => (
+                {
+                  selectedDocument
+                    .sections
+                    .map(
+                      section => (
 
-                    <article
-                      className="section-card"
-                      key={section.id}
-                    >
+                        <article
+                          className="section-card"
+                          key={
+                            section.id
+                          }
+                        >
 
-                      <div className="section-meta">
+                          <div className="section-meta">
 
-                        <span>
-                          {section.page_number
-                            ? `PAGE ${section.page_number}`
-                            : "SECTION"}
-                        </span>
+                            <span>
+                              {
+                                section.page_number
+                                  ? `PAGE ${section.page_number}`
+                                  : "SECTION"
+                              }
+                            </span>
 
-                        <span>
-                          {section.section_title}
-                        </span>
+                            <span>
+                              {
+                                section.section_title
+                              }
+                            </span>
 
-                      </div>
+                          </div>
 
-                      <p>
-                        {section.content}
-                      </p>
 
-                    </article>
+                          <p>
+                            {
+                              section.content
+                            }
+                          </p>
 
-                  )
-                )}
+                        </article>
+
+                      )
+                    )
+                }
 
               </div>
 
@@ -1017,9 +1162,12 @@ function App() {
         )}
 
 
-        {/* IMPACT ANALYSIS */}
+        {/* =================================================
+            IMPACT
+        ================================================= */}
 
-        {activeView === "impact" && (
+        {activeView ===
+          "impact" && (
 
           <section className="impact-page">
 
@@ -1034,12 +1182,14 @@ function App() {
                   </span>
 
                   <h3>
-                    Simulate a knowledge change
+                    Simulate a Knowledge Change
                   </h3>
 
                 </div>
 
-                <GitBranch size={22} />
+                <GitBranch
+                  size={22}
+                />
 
               </div>
 
@@ -1053,7 +1203,9 @@ function App() {
                   </span>
 
                   <input
-                    value={changeTitle}
+                    value={
+                      changeTitle
+                    }
                     onChange={e =>
                       setChangeTitle(
                         e.target.value
@@ -1071,7 +1223,9 @@ function App() {
                   </span>
 
                   <input
-                    value={oldValue}
+                    value={
+                      oldValue
+                    }
                     onChange={e =>
                       setOldValue(
                         e.target.value
@@ -1089,7 +1243,9 @@ function App() {
                   </span>
 
                   <input
-                    value={newValue}
+                    value={
+                      newValue
+                    }
                     onChange={e =>
                       setNewValue(
                         e.target.value
@@ -1107,10 +1263,14 @@ function App() {
                 onClick={
                   analyzeChange
                 }
-                disabled={loading}
+                disabled={
+                  loading
+                }
               >
 
-                <Sparkles size={17} />
+                <Sparkles
+                  size={17}
+                />
 
                 {loading
                   ? "Gemini analyzing..."
@@ -1130,13 +1290,15 @@ function App() {
                 <div>
 
                   <strong>
-                    Gemini is reasoning across
-                    your knowledge base
+                    Gemini is reasoning
+                    across your knowledge
+                    base
                   </strong>
 
                   <span>
                     Checking every indexed
-                    section for semantic dependency.
+                    section for semantic
+                    dependency.
                   </span>
 
                 </div>
@@ -1146,75 +1308,102 @@ function App() {
             )}
 
 
-            {impacts.length > 0 && (
+            {impacts.length >
+              0 && (
 
-              <div className="impact-results">
+              <>
 
-                <div className="impact-summary">
+                <ImpactGraph
+                  impacts={
+                    impacts
+                  }
+                  oldValue={
+                    oldValue
+                  }
+                  newValue={
+                    newValue
+                  }
+                />
 
-                  <div>
 
-                    <span>
-                      DETECTED IMPACT
-                    </span>
+                <div className="impact-results">
 
-                    <strong>
-                      {
-                        affectedImpacts.length
-                      }
-                    </strong>
+                  <div className="impact-summary">
+
+                    <div>
+
+                      <span>
+                        DETECTED IMPACT
+                      </span>
+
+                      <strong>
+                        {
+                          affectedImpacts.length
+                        }
+                      </strong>
+
+                    </div>
+
+
+                    <div>
+
+                      <span>
+                        TOTAL SECTIONS
+                      </span>
+
+                      <strong>
+                        {
+                          impacts.length
+                        }
+                      </strong>
+
+                    </div>
+
+
+                    <div>
+
+                      <span>
+                        REVIEW NEEDED
+                      </span>
+
+                      <strong>
+                        {
+                          affectedImpacts
+                            .filter(
+                              item =>
+                                item.status ===
+                                "pending"
+                            )
+                            .length
+                        }
+                      </strong>
+
+                    </div>
 
                   </div>
 
-                  <div>
 
-                    <span>
-                      TOTAL SECTIONS
-                    </span>
+                  {impacts.map(
+                    impact => (
 
-                    <strong>
-                      {impacts.length}
-                    </strong>
+                      <ImpactCard
+                        key={
+                          impact.id
+                        }
+                        impact={
+                          impact
+                        }
+                        onUpdate={
+                          updateImpact
+                        }
+                      />
 
-                  </div>
-
-                  <div>
-
-                    <span>
-                      REVIEW NEEDED
-                    </span>
-
-                    <strong>
-                      {
-                        affectedImpacts.filter(
-                          x =>
-                            x.status ===
-                            "pending"
-                        ).length
-                      }
-                    </strong>
-
-                  </div>
+                    )
+                  )}
 
                 </div>
 
-
-                {impacts.map(
-                  impact => (
-
-                    <ImpactCard
-                      key={impact.id}
-                      impact={impact}
-                      onUpdate={
-                        updateImpact
-                      }
-                    />
-
-                  )
-                )}
-
-              </div>
-
+              </>
             )}
 
           </section>
@@ -1222,9 +1411,12 @@ function App() {
         )}
 
 
-        {/* REVIEW */}
+        {/* =================================================
+            REVIEW
+        ================================================= */}
 
-        {activeView === "review" && (
+        {activeView ===
+          "review" && (
 
           <section className="panel">
 
@@ -1242,28 +1434,34 @@ function App() {
 
               </div>
 
-              <CheckCircle2 size={22} />
+              <CheckCircle2
+                size={22}
+              />
 
             </div>
 
 
             {impacts.filter(
-              x =>
-                x.affected &&
-                x.status === "pending"
+              item =>
+                item.affected &&
+                item.status ===
+                  "pending"
             ).length === 0 ? (
 
               <div className="empty">
 
-                <CheckCircle2 size={32} />
+                <CheckCircle2
+                  size={32}
+                />
 
                 <strong>
                   Review queue is clear
                 </strong>
 
                 <span>
-                  Run an impact analysis to
-                  generate review candidates.
+                  Run an impact analysis
+                  to generate review
+                  candidates.
                 </span>
 
               </div>
@@ -1272,16 +1470,21 @@ function App() {
 
               impacts
                 .filter(
-                  x =>
-                    x.affected &&
-                    x.status === "pending"
+                  item =>
+                    item.affected &&
+                    item.status ===
+                      "pending"
                 )
                 .map(
                   impact => (
 
                     <ImpactCard
-                      key={impact.id}
-                      impact={impact}
+                      key={
+                        impact.id
+                      }
+                      impact={
+                        impact
+                      }
                       onUpdate={
                         updateImpact
                       }
@@ -1297,9 +1500,12 @@ function App() {
         )}
 
 
-        {/* CONFLICTS */}
+        {/* =================================================
+            CONFLICTS
+        ================================================= */}
 
-        {activeView === "conflicts" && (
+        {activeView ===
+          "conflicts" && (
 
           <section className="panel">
 
@@ -1317,22 +1523,27 @@ function App() {
 
               </div>
 
-              <AlertTriangle size={22} />
+              <AlertTriangle
+                size={22}
+              />
 
             </div>
 
 
             <div className="empty">
 
-              <Network size={32} />
+              <Network
+                size={32}
+              />
 
               <strong>
                 Conflict engine ready
               </strong>
 
               <span>
-                RIPPLE will surface contradictory
-                knowledge when changes are analyzed.
+                Contradictory knowledge
+                will appear here as the
+                knowledge graph grows.
               </span>
 
             </div>
@@ -1349,8 +1560,8 @@ function App() {
 
 
 /* ============================================================
-   COMPONENTS
-   ============================================================ */
+   NAV ITEM
+============================================================ */
 
 function NavItem({
   icon,
@@ -1372,7 +1583,9 @@ function NavItem({
           ? "nav-item active"
           : "nav-item"
       }
-      onClick={onClick}
+      onClick={
+        onClick
+      }
     >
 
       {icon}
@@ -1385,6 +1598,10 @@ function NavItem({
   );
 }
 
+
+/* ============================================================
+   STAT
+============================================================ */
 
 function Stat({
   label,
@@ -1421,6 +1638,10 @@ function Stat({
 }
 
 
+/* ============================================================
+   ACTIVITY
+============================================================ */
+
 function ActivityRow({
   label,
   value
@@ -1446,6 +1667,10 @@ function ActivityRow({
 }
 
 
+/* ============================================================
+   RIPPLE GRAPHIC
+============================================================ */
+
 function RippleGraphic() {
 
   return (
@@ -1453,33 +1678,65 @@ function RippleGraphic() {
     <div className="ripple-graphic">
 
       <div className="orbit orbit-one" />
+
       <div className="orbit orbit-two" />
+
       <div className="orbit orbit-three" />
 
+
       <div className="graph-line line-one" />
+
       <div className="graph-line line-two" />
+
       <div className="graph-line line-three" />
+
       <div className="graph-line line-four" />
 
+
       <div className="graph-node node-center">
-        <Sparkles size={23} />
+
+        <Sparkles
+          size={23}
+        />
+
       </div>
+
 
       <div className="graph-node node-one">
-        <FileText size={17} />
+
+        <FileText
+          size={17}
+        />
+
       </div>
+
 
       <div className="graph-node node-two">
-        <Network size={17} />
+
+        <Network
+          size={17}
+        />
+
       </div>
+
 
       <div className="graph-node node-three">
-        <GitBranch size={17} />
+
+        <GitBranch
+          size={17}
+        />
+
       </div>
 
+
       <div className="graph-node node-four">
-        <ShieldCheck size={17} />
+
+        <ShieldCheck
+          size={17}
+        />
+
       </div>
+
 
       <div className="graph-label">
         KNOWLEDGE GRAPH
@@ -1490,11 +1747,329 @@ function RippleGraphic() {
 }
 
 
+/* ============================================================
+   IMPACT GRAPH
+============================================================ */
+
+function ImpactGraph({
+  impacts,
+  oldValue,
+  newValue
+}: {
+  impacts: Impact[];
+  oldValue: string;
+  newValue: string;
+}) {
+
+  const affected =
+    impacts.filter(
+      item => item.affected
+    );
+
+
+  const nodes: Node[] = [];
+
+  const edges: Edge[] = [];
+
+
+  nodes.push({
+    id: "change",
+
+    position: {
+      x: 430,
+      y: 20
+    },
+
+    data: {
+      label: (
+        <div className="flow-card flow-change">
+
+          <Handle
+            type="source"
+            position={
+              Position.Bottom
+            }
+          />
+
+          <small>
+            CHANGE DETECTED
+          </small>
+
+          <strong>
+            {oldValue}
+            {" → "}
+            {newValue}
+          </strong>
+
+        </div>
+      )
+    },
+
+    style: {
+      background:
+        "transparent",
+
+      border: "none",
+
+      width: 220
+    }
+  });
+
+
+  affected.forEach(
+    (impact, index) => {
+
+      const documentId =
+        `document-${impact.document_id}-${index}`;
+
+      const sectionId =
+        `section-${impact.id}`;
+
+
+      const column =
+        index % 3;
+
+      const row =
+        Math.floor(index / 3);
+
+
+      const x =
+        40 +
+        column * 300;
+
+      const documentY =
+        180 +
+        row * 300;
+
+      const sectionY =
+        documentY + 145;
+
+
+      nodes.push({
+        id: documentId,
+
+        position: {
+          x,
+          y: documentY
+        },
+
+        data: {
+          label: (
+            <div className="flow-card flow-document">
+
+              <Handle
+                type="target"
+                position={
+                  Position.Top
+                }
+              />
+
+              <Handle
+                type="source"
+                position={
+                  Position.Bottom
+                }
+              />
+
+              <small>
+                DOCUMENT
+              </small>
+
+              <strong>
+                {
+                  impact.document_name
+                }
+              </strong>
+
+            </div>
+          )
+        },
+
+        style: {
+          background:
+            "transparent",
+
+          border: "none",
+
+          width: 220
+        }
+      });
+
+
+      nodes.push({
+        id: sectionId,
+
+        position: {
+          x,
+          y: sectionY
+        },
+
+        data: {
+          label: (
+            <div className="flow-card flow-affected">
+
+              <Handle
+                type="target"
+                position={
+                  Position.Top
+                }
+              />
+
+              <small>
+                {impact.page_number
+                  ? `PAGE ${impact.page_number}`
+                  : "SECTION"}
+              </small>
+
+              <strong>
+                {
+                  impact.section_title
+                }
+              </strong>
+
+              <span>
+                {Math.round(
+                  impact.confidence *
+                    100
+                )}
+                % confidence
+              </span>
+
+            </div>
+          )
+        },
+
+        style: {
+          background:
+            "transparent",
+
+          border: "none",
+
+          width: 220
+        }
+      });
+
+
+      edges.push({
+        id:
+          `change-${documentId}`,
+
+        source:
+          "change",
+
+        target:
+          documentId,
+
+        animated: true
+      });
+
+
+      edges.push({
+        id:
+          `${documentId}-${sectionId}`,
+
+        source:
+          documentId,
+
+        target:
+          sectionId,
+
+        animated: true
+      });
+
+    }
+  );
+
+
+  return (
+
+    <div className="graph-container">
+
+      <div className="graph-header">
+
+        <div>
+
+          <span className="section-kicker">
+            KNOWLEDGE DEPENDENCY GRAPH
+          </span>
+
+          <h3>
+            Ripple Map
+          </h3>
+
+        </div>
+
+
+        <div className="graph-count">
+
+          {affected.length}
+          {" affected"}
+
+        </div>
+
+      </div>
+
+
+      <div className="graph">
+
+        {affected.length ===
+        0 ? (
+
+          <div className="graph-empty">
+
+            <CheckCircle2
+              size={32}
+            />
+
+            <strong>
+              No downstream impact
+            </strong>
+
+            <span>
+              Gemini did not detect
+              affected sections.
+            </span>
+
+          </div>
+
+        ) : (
+
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            fitView
+            fitViewOptions={{
+              padding: 0.25
+            }}
+          >
+
+            <Background />
+
+            <Controls />
+
+            <MiniMap />
+
+          </ReactFlow>
+
+        )}
+
+      </div>
+
+    </div>
+  );
+}
+
+
+/* ============================================================
+   IMPACT CARD
+============================================================ */
+
 function ImpactCard({
   impact,
   onUpdate
 }: {
   impact: Impact;
+
   onUpdate: (
     id: number,
     status: string
@@ -1503,7 +2078,8 @@ function ImpactCard({
 
   const confidence =
     Math.round(
-      impact.confidence * 100
+      impact.confidence *
+        100
     );
 
 
@@ -1523,14 +2099,21 @@ function ImpactCard({
 
           <div className="impact-file">
 
-            <FileText size={16} />
+            <FileText
+              size={16}
+            />
 
-            {impact.document_name}
+            {
+              impact.document_name
+            }
 
           </div>
 
+
           <h4>
-            {impact.section_title}
+            {
+              impact.section_title
+            }
           </h4>
 
         </div>
@@ -1545,8 +2128,16 @@ function ImpactCard({
         >
 
           {impact.affected
-            ? <AlertTriangle size={14} />
-            : <Check size={14} />}
+            ? (
+              <AlertTriangle
+                size={14}
+              />
+            )
+            : (
+              <Check
+                size={14}
+              />
+            )}
 
           {impact.affected
             ? "AFFECTED"
@@ -1605,23 +2196,27 @@ function ImpactCard({
       {impact.affected &&
         impact.suggested_fix && (
 
-          <div className="suggested-fix">
+        <div className="suggested-fix">
 
-            <div className="fix-header">
+          <div className="fix-header">
 
-              <Sparkles size={15} />
+            <Sparkles
+              size={15}
+            />
 
-              AI SUGGESTED FIX
-
-            </div>
-
-            <p>
-              {impact.suggested_fix}
-            </p>
+            AI SUGGESTED FIX
 
           </div>
 
-        )}
+
+          <p>
+            {
+              impact.suggested_fix
+            }
+          </p>
+
+        </div>
+      )}
 
 
       {impact.affected && (
@@ -1633,7 +2228,10 @@ function ImpactCard({
             STATUS:{" "}
 
             <strong>
-              {impact.status.toUpperCase()}
+              {
+                impact.status
+                  .toUpperCase()
+              }
             </strong>
 
           </span>
@@ -1651,7 +2249,9 @@ function ImpactCard({
               }
             >
 
-              <XCircle size={15} />
+              <XCircle
+                size={15}
+              />
 
               Reject
 
@@ -1668,7 +2268,9 @@ function ImpactCard({
               }
             >
 
-              <CheckCircle2 size={15} />
+              <CheckCircle2
+                size={15}
+              />
 
               Approve
 
