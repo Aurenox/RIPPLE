@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -10,11 +11,47 @@ import {
 import "./App.css";
 
 function App() {
+  const [uploading, setUploading] = useState(false);
+
+  const handleUpload = async (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    setUploading(true);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      const response = await fetch("http://127.0.0.1:8000/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error("Upload failed");
+      }
+
+      const data = await response.json();
+
+      alert(`Uploaded successfully: ${data.filename}`);
+    } catch (error) {
+      console.error(error);
+      alert("Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  };
+
   return (
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">R</div>
+
           <div>
             <h1>RIPPLE</h1>
             <span>Knowledge Intelligence</span>
@@ -63,20 +100,30 @@ function App() {
             <h2>Good evening.</h2>
           </div>
 
-          <button className="upload-button">
+          <label className="upload-button">
             <Upload size={17} />
-            Upload Knowledge
-          </button>
+
+            {uploading ? "Uploading..." : "Upload Knowledge"}
+
+            <input
+              type="file"
+              accept=".pdf,.docx,.png,.jpg,.jpeg"
+              onChange={handleUpload}
+              hidden
+            />
+          </label>
         </header>
 
         <section className="hero">
           <div>
             <p className="eyebrow">RIPPLE INTELLIGENCE</p>
+
             <h3>
               One change.
               <br />
               <span>Every consequence.</span>
             </h3>
+
             <p className="hero-text">
               Detect outdated knowledge, trace its impact, and repair affected
               information with AI.
@@ -88,6 +135,7 @@ function App() {
               <strong>92</strong>
               <span>/100</span>
             </div>
+
             <div>
               <p>Knowledge Health</p>
               <small>Excellent consistency</small>
@@ -101,16 +149,19 @@ function App() {
             value="248"
             change="+12 this month"
           />
+
           <Stat
             label="Detected Changes"
             value="17"
             change="5 need review"
           />
+
           <Stat
             label="Potential Conflicts"
             value="07"
             change="2 critical"
           />
+
           <Stat
             label="Pending Reviews"
             value="12"
@@ -133,34 +184,47 @@ function App() {
 
             <div className="change">
               <div className="change-icon danger">!</div>
+
               <div className="change-info">
                 <strong>Exam Policy — Deadline changed</strong>
                 <p>Friday → Wednesday</p>
               </div>
-              <span className="badge danger-badge">5 affected</span>
+
+              <span className="badge danger-badge">
+                5 affected
+              </span>
             </div>
 
             <div className="change">
               <div className="change-icon warning">!</div>
+
               <div className="change-info">
                 <strong>Admission Guidelines updated</strong>
                 <p>Verification requirement added</p>
               </div>
-              <span className="badge warning-badge">3 affected</span>
+
+              <span className="badge warning-badge">
+                3 affected
+              </span>
             </div>
 
             <div className="change">
               <div className="change-icon safe">✓</div>
+
               <div className="change-info">
                 <strong>Library Policy reviewed</strong>
                 <p>No downstream conflicts found</p>
               </div>
-              <span className="badge safe-badge">Clear</span>
+
+              <span className="badge safe-badge">
+                Clear
+              </span>
             </div>
           </div>
 
           <div className="panel ripple-panel">
             <p className="eyebrow">ACTIVE RIPPLE</p>
+
             <h4>Exam Policy</h4>
 
             <div className="ripple-graph">
