@@ -1,0 +1,81 @@
+RIPPLE OPERATIONS KNOWLEDGE BASE
+Version: 3.2
+
+ORDER PROCESSING POLICY
+
+1. Standard orders below ₹50,000 should be verified and processed within 24 hours.
+
+2. Orders above ₹50,000 require manager approval before processing.
+
+3. Orders marked as high-risk require additional verification by the Operations Compliance Team.
+
+4. The Operations Team is responsible for order verification, customer information validation, and status updates.
+
+5. If an order is delayed for more than 24 hours, the Operations Team must notify the responsible manager.
+
+6. Express orders have a target processing time of 8 hours and should be prioritized over standard orders.
+
+7. Manager approval is required when changing the processing rules for high-value orders.
+
+
+CUSTOMER SUPPORT PROCEDURE
+
+1. Customer complaints related to delayed orders should first be assigned to the Customer Support Team.
+
+2. If the delay is caused by order verification, Customer Support should coordinate with Operations.
+
+3. Complaints involving high-value orders should be escalated to a manager.
+
+4. Repeated complaints involving the same process should be reviewed for a possible operational issue.
+
+
+OPERATIONS WORKFLOW
+
+1. Order received
+   ↓
+2. Customer information validation
+   ↓
+3. Order verification
+   ↓
+4. Risk assessment
+   ↓
+5. Manager approval if required
+   ↓
+6. Order processing
+   ↓
+7. Customer notification
+
+8. Removing the verification step may reduce processing time, but could increase the risk of incorrect or fraudulent orders.
+
+9. Automating standard-order approval may reduce workload for managers, but the system must continue to route high-value and high-risk orders for human review.
+
+
+ESCALATION POLICY
+
+1. Processing delays above 24 hours are considered operational exceptions.
+
+2. Processing delays above 48 hours require manager review.
+
+3. More than 10 similar complaints within one week should trigger an operational investigation.
+
+4. Any change affecting approval rules must be reviewed before implementation.
+
+
+KNOWN OPERATIONAL ISSUE
+
+Recent reports indicate that order-processing delays have increased.
+
+Several delayed orders were waiting for verification or manager approval.
+
+The Operations Team has reported increased workload during periods of high order volume.
+
+Customer Support has also reported an increase in complaints related to delayed deliveries.
+
+
+PROPOSED CHANGE
+
+A possible improvement is to introduce automated approval for standard orders below ₹50,000.
+
+High-value orders and high-risk orders should continue to require human approval.
+
+Before implementing the change, its effects on processing time, operational workload, compliance risk, and customer complaints should be evaluated.

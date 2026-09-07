@@ -1,1558 +1,944 @@
-import {
-  useEffect,
-  useState
-} from "react";
-
-import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  Handle,
-  Position,
-  type Node,
-  type Edge
-} from "@xyflow/react";
-
-import "@xyflow/react/dist/style.css";
-
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
+  BarChart3,
+  Brain,
   Check,
-  CheckCircle2,
   ChevronRight,
-  FileText,
+  CircleAlert,
+  Clock3,
   GitBranch,
-  LayoutDashboard,
+  Layers3,
+  Lightbulb,
+  Lock,
+  LogOut,
+  Menu,
   Network,
+  Play,
+  Plus,
   RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
+  Target,
+  TrendingUp,
   Upload,
   X,
-  XCircle
+  Zap,
 } from "lucide-react";
-
 import "./App.css";
 
+const API = "http://127.0.0.1:8000";
 
-const API =
-  "http://127.0.0.1:8000";
+type View =
+  | "command"
+  | "cases"
+  | "impact"
+  | "decision";
 
+type CaseItem = {
+  id: number;
+  title: string;
+  description: string;
+  category: string;
+  priority: string;
+  confidence: number;
+  status: string;
+  ai_summary: string;
+  root_cause: any[];
+  recommendation: string;
+  created_at: string;
+};
 
 type DocumentItem = {
   id: number;
-  filename: string;
+  name: string;
   file_type: string;
-  uploaded_at: string;
-  section_count: number;
+  created_at: string;
 };
 
-
-type Section = {
+type Decision = {
   id: number;
-  document_id: number;
-  page_number: number | null;
-  section_title: string;
-  content: string;
+  title: string;
+  action: string;
+  recommendation: string;
+  risk: number;
+  status: string;
+  approved_by?: string;
+  created_at: string;
+  decided_at?: string;
 };
 
-
-type Impact = {
+type Pattern = {
   id: number;
-  document_id: number;
-  document_name: string;
-  section_id: number;
-  section_title: string;
-  page_number: number | null;
-  content: string;
-  affected: boolean;
+  title: string;
+  description: string;
   confidence: number;
-  reason: string;
-  suggested_fix: string;
+  severity: string;
+  case_count: number;
   status: string;
 };
 
-
-type Dashboard = {
-  documents: number;
-  sections: number;
-  affected: number;
-  pending: number;
-  approved: number;
-  rejected: number;
-  health: number;
-  gemini: boolean;
-  model: string;
+type SimulationOption = {
+  name: string;
+  risk: number;
+  impact: number;
+  confidence: number;
+  affected_areas: string[];
+  consequences: string[];
+  required_actions: string[];
+  reason: string;
 };
 
+type SimulationResult = {
+  options: SimulationOption[];
+  recommended_option: string;
+  recommendation_reason: string;
+  overall_risk: number;
+};
+
+type Dashboard = {
+  system_score: number;
+  documents: number;
+  cases: number;
+  open_cases: number;
+  patterns: number;
+  pending_decisions: number;
+  conflicts: number;
+  impacts: number;
+  outcomes: number;
+  pulse: {
+    urgent_cases: number;
+    emerging_patterns: number;
+    knowledge_risks: number;
+    decisions_waiting: number;
+  };
+};
+
+type AuditLog = {
+  id: number;
+  actor: string;
+  role: string;
+  action: string;
+  target_type: string;
+  target_id?: number;
+  details: string;
+  created_at: string;
+};
+
+async function api<T = any>(
+  path: string,
+  options?: RequestInit
+): Promise<T> {
+  const response = await fetch(`${API}${path}`, options);
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `Request failed: ${response.status}`);
+  }
+
+  return response.json();
+}
 
 function App() {
-
-  const [documents, setDocuments] =
-    useState<DocumentItem[]>([]);
+  const [view, setView] = useState<View>("command");
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const [dashboard, setDashboard] =
     useState<Dashboard | null>(null);
 
-  const [selectedDocument, setSelectedDocument] =
-    useState<{
-      document: DocumentItem;
-      sections: Section[];
-    } | null>(null);
+  const [cases, setCases] =
+    useState<CaseItem[]>([]);
 
-  const [impacts, setImpacts] =
-    useState<Impact[]>([]);
+  const [documents, setDocuments] =
+    useState<DocumentItem[]>([]);
 
-  const [changeTitle, setChangeTitle] =
-    useState(
-      "Exam Policy — Deadline Changed"
-    );
+  const [patterns, setPatterns] =
+    useState<Pattern[]>([]);
 
-  const [oldValue, setOldValue] =
-    useState("Friday");
+  const [decisions, setDecisions] =
+    useState<Decision[]>([]);
 
-  const [newValue, setNewValue] =
-    useState("Wednesday");
+  const [auditLogs, setAuditLogs] =
+    useState<AuditLog[]>([]);
 
   const [loading, setLoading] =
     useState(false);
 
+  const [error, setError] =
+    useState("");
+
+  const [selectedCase, setSelectedCase] =
+    useState<CaseItem | null>(null);
+
+  const [selectedDecision, setSelectedDecision] =
+    useState<Decision | null>(null);
+
+  const [showNewCase, setShowNewCase] =
+    useState(false);
+
+  const [showOutcome, setShowOutcome] =
+    useState(false);
+
+  const [caseForm, setCaseForm] = useState({
+    title: "",
+    description: "",
+    category: "Operational",
+  });
+
+  const [impactForm, setImpactForm] = useState({
+    title: "",
+    scenario: "",
+  });
+
+  const [simulation, setSimulation] =
+    useState<SimulationResult | null>(null);
+
   const [uploading, setUploading] =
     useState(false);
 
-  const [activeView, setActiveView] =
-    useState("dashboard");
+  const [manager, setManager] =
+    useState("Manager");
 
-  const [message, setMessage] =
+  const [pin, setPin] =
     useState("");
 
+  const [outcomeForm, setOutcomeForm] = useState({
+    metric: "",
+    before_value: "",
+    after_value: "",
+    unit: "",
+    result: "",
+  });
 
-  async function loadDashboard() {
-
+  async function loadAll() {
     try {
+      setLoading(true);
+      setError("");
 
-      const response =
-        await fetch(
-          `${API}/dashboard`
-        );
+      const [
+        dash,
+        caseData,
+        docs,
+        patternData,
+        decisionData,
+        auditData,
+      ] = await Promise.all([
+        api<Dashboard>("/dashboard"),
+        api<CaseItem[]>("/cases"),
+        api<DocumentItem[]>("/documents"),
+        api<Pattern[]>("/patterns"),
+        api<Decision[]>("/decisions"),
+        api<AuditLog[]>("/audit"),
+      ]);
 
-      const data =
-        await response.json();
-
-      setDashboard(data);
-
-    } catch {
-
-      setMessage(
-        "Backend is not running."
+      setDashboard(dash);
+      setCases(caseData);
+      setDocuments(docs);
+      setPatterns(patternData);
+      setDecisions(decisionData);
+      setAuditLogs(auditData);
+    } catch (err: any) {
+      setError(
+        err?.message ||
+          "Unable to connect to RIPPLE backend."
       );
-    }
-  }
-
-
-  async function loadDocuments() {
-
-    try {
-
-      const response =
-        await fetch(
-          `${API}/documents`
-        );
-
-      const data =
-        await response.json();
-
-      setDocuments(data);
-
-    } catch {
-
-      console.error(
-        "Could not load documents"
-      );
-    }
-  }
-
-
-  async function refresh() {
-
-    await Promise.all([
-      loadDashboard(),
-      loadDocuments()
-    ]);
-  }
-
-
-  useEffect(() => {
-
-    refresh();
-
-  }, []);
-
-
-  async function uploadFile(
-    event: React.ChangeEvent<HTMLInputElement>
-  ) {
-
-    const file =
-      event.target.files?.[0];
-
-    if (!file) return;
-
-    setUploading(true);
-
-    setMessage(
-      "Uploading and indexing..."
-    );
-
-    const formData =
-      new FormData();
-
-    formData.append(
-      "file",
-      file
-    );
-
-    try {
-
-      const response =
-        await fetch(
-          `${API}/upload`,
-          {
-            method: "POST",
-            body: formData
-          }
-        );
-
-      const data =
-        await response.json();
-
-      if (!response.ok) {
-
-        throw new Error(
-          data.detail ||
-          "Upload failed."
-        );
-      }
-
-      setMessage(
-        `${file.name} indexed successfully.`
-      );
-
-      await refresh();
-
-    } catch (error) {
-
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Upload failed."
-      );
-
     } finally {
-
-      setUploading(false);
-
-      event.target.value = "";
-    }
-  }
-
-
-  async function openDocument(
-    id: number
-  ) {
-
-    try {
-
-      const response =
-        await fetch(
-          `${API}/documents/${id}`
-        );
-
-      const data =
-        await response.json();
-
-      setSelectedDocument({
-        document:
-          data.document,
-        sections:
-          data.sections
-      });
-
-      setActiveView(
-        "knowledge"
-      );
-
-    } catch {
-
-      setMessage(
-        "Could not open document."
-      );
-    }
-  }
-
-
-  async function analyzeChange() {
-
-    if (
-      !oldValue.trim() ||
-      !newValue.trim()
-    ) {
-
-      setMessage(
-        "Enter old and new values."
-      );
-
-      return;
-    }
-
-    setLoading(true);
-
-    setImpacts([]);
-
-    setActiveView(
-      "impact"
-    );
-
-    setMessage(
-      "Gemini is analyzing your knowledge base..."
-    );
-
-    try {
-
-      const response =
-        await fetch(
-          `${API}/analyze-change`,
-          {
-            method: "POST",
-
-            headers: {
-              "Content-Type":
-                "application/json"
-            },
-
-            body: JSON.stringify({
-              title:
-                changeTitle,
-
-              old_value:
-                oldValue,
-
-              new_value:
-                newValue
-            })
-          }
-        );
-
-      const data =
-        await response.json();
-
-      if (!response.ok) {
-
-        throw new Error(
-          data.detail ||
-          "Analysis failed."
-        );
-      }
-
-      setImpacts(
-        data.results || []
-      );
-
-      setMessage(
-        `${data.affected_sections} affected sections detected using ${data.ai_engine}.`
-      );
-
-      await loadDashboard();
-
-    } catch (error) {
-
-      setMessage(
-        error instanceof Error
-          ? error.message
-          : "Analysis failed."
-      );
-
-    } finally {
-
       setLoading(false);
     }
   }
 
+  useEffect(() => {
+    loadAll();
+  }, []);
 
-  async function updateImpact(
-    id: number,
-    status: string
-  ) {
+  async function createCase() {
+    if (
+      !caseForm.title.trim() ||
+      !caseForm.description.trim()
+    ) {
+      return;
+    }
 
     try {
+      setLoading(true);
 
-      const response =
-        await fetch(
-          `${API}/impacts/${id}`,
-          {
-            method: "PATCH",
+      await api("/cases", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(caseForm),
+      });
 
-            headers: {
-              "Content-Type":
-                "application/json"
-            },
+      setCaseForm({
+        title: "",
+        description: "",
+        category: "Operational",
+      });
 
-            body: JSON.stringify({
-              status
-            })
-          }
-        );
+      setShowNewCase(false);
 
-      if (!response.ok) {
-
-        throw new Error(
-          "Could not update impact."
-        );
-      }
-
-      setImpacts(
-        current =>
-          current.map(
-            impact =>
-              impact.id === id
-                ? {
-                    ...impact,
-                    status
-                  }
-                : impact
-          )
-      );
-
-      await loadDashboard();
-
-    } catch {
-
-      setMessage(
-        "Could not update review."
-      );
+      await loadAll();
+      setView("cases");
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   }
 
+  async function detectPatterns() {
+    try {
+      setLoading(true);
 
-  async function resetData() {
+      await api("/patterns/detect", {
+        method: "POST",
+      });
 
-    const confirmed =
-      window.confirm(
-        "Delete all RIPPLE data?"
-      );
-
-    if (!confirmed) return;
-
-    await fetch(
-      `${API}/reset`,
-      {
-        method: "DELETE"
-      }
-    );
-
-    setSelectedDocument(
-      null
-    );
-
-    setImpacts([]);
-
-    await refresh();
-
-    setMessage(
-      "Workspace reset."
-    );
+      await loadAll();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
+  async function runSimulation() {
+    if (
+      !impactForm.title.trim() ||
+      !impactForm.scenario.trim()
+    ) {
+      return;
+    }
 
-  const affectedImpacts =
-    impacts.filter(
-      item => item.affected
-    );
+    try {
+      setLoading(true);
+      setSimulation(null);
 
+      const result = await api<SimulationResult>(
+        "/simulate",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(impactForm),
+        }
+      );
+
+      setSimulation(result);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function sendToDecision(
+    option: SimulationOption
+  ) {
+    try {
+      setLoading(true);
+
+      await api("/decisions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title:
+            impactForm.title ||
+            "RIPPLE Simulation Decision",
+          action: option.name,
+          recommendation: option.reason,
+          risk: option.risk,
+        }),
+      });
+
+      await loadAll();
+      setView("decision");
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function approveDecision() {
+    if (!selectedDecision || pin.length !== 4) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      await api("/decisions/approve", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          decision_id: selectedDecision.id,
+          manager,
+          pin,
+        }),
+      });
+
+      setPin("");
+      setSelectedDecision(null);
+
+      await loadAll();
+    } catch (err: any) {
+      setError(
+        "Authorization failed. Demo approval PIN: 2468"
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function rejectDecision(
+    decisionId: number
+  ) {
+    try {
+      setLoading(true);
+
+      await api(
+        `/decisions/${decisionId}/reject`,
+        {
+          method: "POST",
+        }
+      );
+
+      setSelectedDecision(null);
+      await loadAll();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function recordOutcome() {
+    if (!selectedDecision) return;
+
+    try {
+      setLoading(true);
+
+      await api("/outcomes", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          decision_id: selectedDecision.id,
+          metric: outcomeForm.metric,
+          before_value:
+            Number(outcomeForm.before_value),
+          after_value:
+            Number(outcomeForm.after_value),
+          unit: outcomeForm.unit,
+          result: outcomeForm.result,
+        }),
+      });
+
+      setShowOutcome(false);
+
+      setOutcomeForm({
+        metric: "",
+        before_value: "",
+        after_value: "",
+        unit: "",
+        result: "",
+      });
+
+      await loadAll();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function uploadDocument(
+    event: React.ChangeEvent<HTMLInputElement>
+  ) {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    try {
+      setUploading(true);
+
+      const form = new FormData();
+      form.append("file", file);
+
+      await api("/upload", {
+        method: "POST",
+        body: form,
+      });
+
+      await loadAll();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+      event.target.value = "";
+    }
+  }
+
+  async function detectConflicts() {
+    try {
+      setLoading(true);
+
+      await api("/conflicts/detect", {
+        method: "POST",
+      });
+
+      await loadAll();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const urgentCases = useMemo(
+    () =>
+      cases.filter(
+        (item) =>
+          item.priority === "Immediate" ||
+          item.priority === "Critical"
+      ),
+    [cases]
+  );
+
+  function navigate(next: View) {
+    setView(next);
+    setMenuOpen(false);
+    setError("");
+  }
 
   return (
-    <div className="app">
+    <div className="app-shell">
 
-      {/* SIDEBAR */}
-
-      <aside className="sidebar">
-
+      <aside
+        className={`sidebar ${
+          menuOpen ? "sidebar-open" : ""
+        }`}
+      >
         <div className="brand">
-
           <div className="brand-mark">
-            R
+            <span />
+            <span />
+            <span />
           </div>
 
           <div>
-
-            <div className="brand-name">
-              RIPPLE
-            </div>
-
-            <div className="brand-sub">
-              KNOWLEDGE INTELLIGENCE
-            </div>
-
+            <h1>RIPPLE</h1>
+            <p>Decision Intelligence</p>
           </div>
-
         </div>
 
+        <div className="side-label">
+          WORKSPACE
+        </div>
 
-        <nav className="nav">
-
-          <NavItem
-            icon={
-              <LayoutDashboard
-                size={18}
-              />
-            }
-            label="Dashboard"
-            active={
-              activeView === "dashboard"
-            }
-            onClick={() =>
-              setActiveView(
-                "dashboard"
-              )
-            }
+        <nav>
+          <NavButton
+            active={view === "command"}
+            icon={<Activity size={18} />}
+            label="Command Center"
+            onClick={() => navigate("command")}
           />
 
-          <NavItem
-            icon={
-              <FileText size={18} />
+          <NavButton
+            active={view === "cases"}
+            icon={<CircleAlert size={18} />}
+            label="Cases"
+            badge={
+              dashboard?.open_cases
+                ? String(dashboard.open_cases)
+                : undefined
             }
-            label="Knowledge"
-            active={
-              activeView === "knowledge"
-            }
-            onClick={() =>
-              setActiveView(
-                "knowledge"
-              )
-            }
+            onClick={() => navigate("cases")}
           />
 
-          <NavItem
-            icon={
-              <Network size={18} />
-            }
-            label="Impact Analysis"
-            active={
-              activeView === "impact"
-            }
-            onClick={() =>
-              setActiveView(
-                "impact"
-              )
-            }
+          <NavButton
+            active={view === "impact"}
+            icon={<Network size={18} />}
+            label="Impact Lab"
+            onClick={() => navigate("impact")}
           />
 
-          <NavItem
-            icon={
-              <AlertTriangle
-                size={18}
-              />
+          <NavButton
+            active={view === "decision"}
+            icon={<ShieldCheck size={18} />}
+            label="Decision Room"
+            badge={
+              dashboard?.pending_decisions
+                ? String(dashboard.pending_decisions)
+                : undefined
             }
-            label="Conflicts"
-            active={
-              activeView === "conflicts"
-            }
-            onClick={() =>
-              setActiveView(
-                "conflicts"
-              )
-            }
+            onClick={() => navigate("decision")}
           />
-
-          <NavItem
-            icon={
-              <CheckCircle2
-                size={18}
-              />
-            }
-            label="Review Queue"
-            active={
-              activeView === "review"
-            }
-            onClick={() =>
-              setActiveView(
-                "review"
-              )
-            }
-          />
-
         </nav>
-
 
         <div className="sidebar-bottom">
 
-          <div className="engine-status">
-
-            <span className="status-dot" />
-
+          <div className="system-mini">
+            <div className="mini-pulse" />
             <div>
-
-              <strong>
-                AI Engine
-              </strong>
-
-              <small>
-                {dashboard?.gemini
-                  ? "Gemini Online"
-                  : "Fallback Mode"}
-              </small>
-
+              <strong>RIPPLE ONLINE</strong>
+              <span>
+                AI engine connected
+              </span>
             </div>
-
           </div>
 
+          <div className="profile">
+            <div className="avatar">
+              M
+            </div>
 
-          <button
-            className="reset-button"
-            onClick={
-              resetData
-            }
-          >
-            Reset Workspace
-          </button>
+            <div>
+              <strong>Manager</strong>
+              <span>Decision authority</span>
+            </div>
 
+            <LogOut size={15} />
+          </div>
         </div>
-
       </aside>
-
-
-      {/* MAIN */}
 
       <main className="main">
 
         <header className="topbar">
 
-          <div>
+          <button
+            className="mobile-menu"
+            onClick={() =>
+              setMenuOpen(!menuOpen)
+            }
+          >
+            <Menu size={21} />
+          </button>
 
-            <div className="eyebrow">
-              KNOWLEDGE CONTROL CENTER
-            </div>
-
-            <h1>
-              {activeView ===
-              "dashboard"
-                ? "Dashboard"
-                : activeView ===
-                  "knowledge"
-                ? "Knowledge Base"
-                : activeView ===
-                  "impact"
-                ? "Impact Analysis"
-                : activeView ===
-                  "review"
-                ? "Review Queue"
-                : "Conflict Detection"}
-            </h1>
-
+          <div className="breadcrumb">
+            RIPPLE
+            <ChevronRight size={14} />
+            <strong>
+              {view === "command"
+                ? "Command Center"
+                : view === "cases"
+                ? "Cases"
+                : view === "impact"
+                ? "Impact Lab"
+                : "Decision Room"}
+            </strong>
           </div>
-
 
           <div className="top-actions">
 
             <button
               className="icon-button"
-              onClick={
-                refresh
-              }
+              onClick={loadAll}
+              title="Refresh"
             >
               <RefreshCw
                 size={17}
+                className={
+                  loading
+                    ? "spin"
+                    : ""
+                }
               />
             </button>
 
+            <button
+              className="primary-button"
+              onClick={() =>
+                setShowNewCase(true)
+              }
+            >
+              <Plus size={17} />
+              New Investigation
+            </button>
 
-            <label className="upload-button">
+          </div>
+        </header>
 
-              <Upload
-                size={17}
-              />
+        {error && (
+          <div className="error-banner">
+            <AlertTriangle size={17} />
+            <span>{error}</span>
+            <button
+              onClick={() => setError("")}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
 
-              {uploading
-                ? "Indexing..."
-                : "Upload Knowledge"}
+        {view === "command" && (
+          <CommandCenter
+            dashboard={dashboard}
+            cases={cases}
+            patterns={patterns}
+            decisions={decisions}
+            documents={documents}
+            urgentCases={urgentCases}
+            onNavigate={navigate}
+            onDetectPatterns={detectPatterns}
+            onDetectConflicts={
+              detectConflicts
+            }
+            onUpload={uploadDocument}
+            uploading={uploading}
+            auditLogs={auditLogs}
+          />
+        )}
 
+        {view === "cases" && (
+          <CasesPage
+            cases={cases}
+            selectedCase={selectedCase}
+            onSelect={setSelectedCase}
+            onNew={() => setShowNewCase(true)}
+            onDetectPatterns={detectPatterns}
+          />
+        )}
+
+        {view === "impact" && (
+          <ImpactLab
+            form={impactForm}
+            setForm={setImpactForm}
+            onRun={runSimulation}
+            simulation={simulation}
+            onDecision={sendToDecision}
+            loading={loading}
+            documents={documents}
+          />
+        )}
+
+        {view === "decision" && (
+          <DecisionRoom
+            decisions={decisions}
+            selected={selectedDecision}
+            setSelected={setSelectedDecision}
+            manager={manager}
+            setManager={setManager}
+            pin={pin}
+            setPin={setPin}
+            onApprove={approveDecision}
+            onReject={rejectDecision}
+            onOutcome={() =>
+              setShowOutcome(true)
+            }
+            loading={loading}
+          />
+        )}
+
+      </main>
+
+      {showNewCase && (
+        <Modal
+          title="Start AI Investigation"
+          subtitle="Describe the problem. RIPPLE will investigate the available evidence and organizational knowledge."
+          onClose={() =>
+            setShowNewCase(false)
+          }
+        >
+          <div className="form-grid">
+
+            <label>
+              Problem title
               <input
-                type="file"
-                accept=".pdf,.docx,.txt,.md"
-                onChange={
-                  uploadFile
+                value={caseForm.title}
+                onChange={(e) =>
+                  setCaseForm({
+                    ...caseForm,
+                    title: e.target.value,
+                  })
                 }
-                hidden
+                placeholder="e.g. Order processing delays increased"
               />
+            </label>
 
+            <label>
+              Category
+              <select
+                value={caseForm.category}
+                onChange={(e) =>
+                  setCaseForm({
+                    ...caseForm,
+                    category: e.target.value,
+                  })
+                }
+              >
+                <option>Operational</option>
+                <option>Process</option>
+                <option>Technology</option>
+                <option>Customer</option>
+                <option>Compliance</option>
+                <option>Security</option>
+                <option>Other</option>
+              </select>
+            </label>
+
+            <label className="full">
+              What happened?
+              <textarea
+                value={caseForm.description}
+                onChange={(e) =>
+                  setCaseForm({
+                    ...caseForm,
+                    description:
+                      e.target.value,
+                  })
+                }
+                placeholder="Describe the problem, observed signals, affected areas, and anything already known..."
+                rows={7}
+              />
             </label>
 
           </div>
 
-        </header>
+          <div className="modal-actions">
+            <button
+              className="secondary-button"
+              onClick={() =>
+                setShowNewCase(false)
+              }
+            >
+              Cancel
+            </button>
 
-
-        {message && (
-
-          <div className="message">
-
-            <Sparkles
-              size={16}
-            />
-
-            {message}
-
+            <button
+              className="primary-button"
+              onClick={createCase}
+              disabled={loading}
+            >
+              <Sparkles size={17} />
+              Investigate with AI
+            </button>
           </div>
+        </Modal>
+      )}
 
-        )}
+      {showOutcome &&
+        selectedDecision && (
+          <Modal
+            title="Measure the Result"
+            subtitle="Close the decision loop by recording what changed after execution."
+            onClose={() =>
+              setShowOutcome(false)
+            }
+          >
+            <div className="form-grid">
 
-
-        {/* =================================================
-            DASHBOARD
-        ================================================= */}
-
-        {activeView ===
-          "dashboard" && (
-
-          <>
-
-            <section className="hero">
-
-              <div className="hero-copy">
-
-                <div className="hero-label">
-                  AI CHANGE INTELLIGENCE
-                </div>
-
-                <h2>
-                  One change.
-                  <br />
-                  Every consequence.
-                </h2>
-
-                <p>
-                  RIPPLE maps connected
-                  knowledge, detects
-                  downstream impact and
-                  proposes safe updates
-                  before outdated
-                  information spreads.
-                </p>
-
-                <button
-                  className="primary-button"
-                  onClick={() =>
-                    setActiveView(
-                      "impact"
-                    )
+              <label>
+                Metric
+                <input
+                  value={outcomeForm.metric}
+                  onChange={(e) =>
+                    setOutcomeForm({
+                      ...outcomeForm,
+                      metric: e.target.value,
+                    })
                   }
-                >
-                  Open Impact Analysis
-
-                  <ChevronRight
-                    size={17}
-                  />
-                </button>
-
-              </div>
-
-
-              <RippleGraphic />
-
-            </section>
-
-
-            <section className="stats">
-
-              <Stat
-                label="Knowledge Assets"
-                value={
-                  dashboard?.documents ??
-                  0
-                }
-                icon={
-                  <FileText
-                    size={18}
-                  />
-                }
-              />
-
-              <Stat
-                label="Indexed Sections"
-                value={
-                  dashboard?.sections ??
-                  0
-                }
-                icon={
-                  <Network
-                    size={18}
-                  />
-                }
-              />
-
-              <Stat
-                label="Affected"
-                value={
-                  dashboard?.affected ??
-                  0
-                }
-                icon={
-                  <AlertTriangle
-                    size={18}
-                  />
-                }
-              />
-
-              <Stat
-                label="Pending Review"
-                value={
-                  dashboard?.pending ??
-                  0
-                }
-                icon={
-                  <Activity
-                    size={18}
-                  />
-                }
-              />
-
-            </section>
-
-
-            <section className="dashboard-grid">
-
-              <div className="panel">
-
-                <div className="panel-heading">
-
-                  <div>
-
-                    <span className="section-kicker">
-                      KNOWLEDGE HEALTH
-                    </span>
-
-                    <h3>
-                      Workspace Integrity
-                    </h3>
-
-                  </div>
-
-                  <ShieldCheck
-                    size={22}
-                  />
-
-                </div>
-
-
-                <div className="health">
-
-                  <div className="health-score">
-
-                    {dashboard?.health ??
-                      100}%
-
-                  </div>
-
-                  <div className="health-copy">
-
-                    <strong>
-                      Knowledge health
-                    </strong>
-
-                    <span>
-                      Based on detected
-                      downstream changes
-                    </span>
-
-                  </div>
-
-                </div>
-
-
-                <div className="progress">
-
-                  <div
-                    style={{
-                      width:
-                        `${
-                          dashboard?.health ??
-                          100
-                        }%`
-                    }}
-                  />
-
-                </div>
-
-              </div>
-
-
-              <div className="panel">
-
-                <div className="panel-heading">
-
-                  <div>
-
-                    <span className="section-kicker">
-                      SYSTEM ACTIVITY
-                    </span>
-
-                    <h3>
-                      Overview
-                    </h3>
-
-                  </div>
-
-                  <Activity
-                    size={22}
-                  />
-
-                </div>
-
-
-                <div className="activity-list">
-
-                  <ActivityRow
-                    label="Documents indexed"
-                    value={
-                      dashboard?.documents ??
-                      0
-                    }
-                  />
-
-                  <ActivityRow
-                    label="Sections analyzed"
-                    value={
-                      dashboard?.sections ??
-                      0
-                    }
-                  />
-
-                  <ActivityRow
-                    label="Impact candidates"
-                    value={
-                      dashboard?.affected ??
-                      0
-                    }
-                  />
-
-                  <ActivityRow
-                    label="Approved fixes"
-                    value={
-                      dashboard?.approved ??
-                      0
-                    }
-                  />
-
-                </div>
-
-              </div>
-
-            </section>
-
-          </>
-        )}
-
-
-        {/* =================================================
-            KNOWLEDGE
-        ================================================= */}
-
-        {activeView ===
-          "knowledge" && (
-
-          <section className="knowledge-layout">
-
-            <div className="panel">
-
-              <div className="panel-heading">
-
-                <div>
-
-                  <span className="section-kicker">
-                    KNOWLEDGE REPOSITORY
-                  </span>
-
-                  <h3>
-                    Indexed Documents
-                  </h3>
-
-                </div>
-
-                <Search
-                  size={20}
+                  placeholder="Processing time"
                 />
+              </label>
 
-              </div>
+              <label>
+                Unit
+                <input
+                  value={outcomeForm.unit}
+                  onChange={(e) =>
+                    setOutcomeForm({
+                      ...outcomeForm,
+                      unit: e.target.value,
+                    })
+                  }
+                  placeholder="minutes"
+                />
+              </label>
 
+              <label>
+                Before
+                <input
+                  type="number"
+                  value={
+                    outcomeForm.before_value
+                  }
+                  onChange={(e) =>
+                    setOutcomeForm({
+                      ...outcomeForm,
+                      before_value:
+                        e.target.value,
+                    })
+                  }
+                />
+              </label>
 
-              <div className="document-list">
+              <label>
+                After
+                <input
+                  type="number"
+                  value={
+                    outcomeForm.after_value
+                  }
+                  onChange={(e) =>
+                    setOutcomeForm({
+                      ...outcomeForm,
+                      after_value:
+                        e.target.value,
+                    })
+                  }
+                />
+              </label>
 
-                {documents.length ===
-                  0 && (
-
-                  <div className="empty">
-
-                    <FileText
-                      size={30}
-                    />
-
-                    <strong>
-                      No knowledge uploaded
-                    </strong>
-
-                    <span>
-                      Upload PDF, DOCX,
-                      TXT or Markdown.
-                    </span>
-
-                  </div>
-
-                )}
-
-
-                {documents.map(
-                  document => (
-
-                    <button
-                      className="document-row"
-                      key={
-                        document.id
-                      }
-                      onClick={() =>
-                        openDocument(
-                          document.id
-                        )
-                      }
-                    >
-
-                      <div className="file-icon">
-
-                        <FileText
-                          size={19}
-                        />
-
-                      </div>
-
-
-                      <div className="document-info">
-
-                        <strong>
-                          {
-                            document.filename
-                          }
-                        </strong>
-
-                        <span>
-                          {
-                            document.section_count
-                          } indexed sections
-                        </span>
-
-                      </div>
-
-
-                      <ChevronRight
-                        size={17}
-                      />
-
-                    </button>
-
-                  )
-                )}
-
-              </div>
+              <label className="full">
+                Result note
+                <textarea
+                  value={outcomeForm.result}
+                  onChange={(e) =>
+                    setOutcomeForm({
+                      ...outcomeForm,
+                      result: e.target.value,
+                    })
+                  }
+                  rows={4}
+                  placeholder="What happened after the intervention?"
+                />
+              </label>
 
             </div>
 
-
-            {selectedDocument && (
-
-              <div className="panel viewer">
-
-                <div className="panel-heading">
-
-                  <div>
-
-                    <span className="section-kicker">
-                      DOCUMENT VIEWER
-                    </span>
-
-                    <h3>
-                      {
-                        selectedDocument
-                          .document
-                          .filename
-                      }
-                    </h3>
-
-                  </div>
-
-
-                  <button
-                    className="icon-button"
-                    onClick={() =>
-                      setSelectedDocument(
-                        null
-                      )
-                    }
-                  >
-
-                    <X
-                      size={17}
-                    />
-
-                  </button>
-
-                </div>
-
-
-                {
-                  selectedDocument
-                    .sections
-                    .map(
-                      section => (
-
-                        <article
-                          className="section-card"
-                          key={
-                            section.id
-                          }
-                        >
-
-                          <div className="section-meta">
-
-                            <span>
-                              {
-                                section.page_number
-                                  ? `PAGE ${section.page_number}`
-                                  : "SECTION"
-                              }
-                            </span>
-
-                            <span>
-                              {
-                                section.section_title
-                              }
-                            </span>
-
-                          </div>
-
-
-                          <p>
-                            {
-                              section.content
-                            }
-                          </p>
-
-                        </article>
-
-                      )
-                    )
-                }
-
-              </div>
-
-            )}
-
-          </section>
-
-        )}
-
-
-        {/* =================================================
-            IMPACT
-        ================================================= */}
-
-        {activeView ===
-          "impact" && (
-
-          <section className="impact-page">
-
-            <div className="panel analyzer">
-
-              <div className="panel-heading">
-
-                <div>
-
-                  <span className="section-kicker">
-                    CHANGE INTELLIGENCE
-                  </span>
-
-                  <h3>
-                    Simulate a Knowledge Change
-                  </h3>
-
-                </div>
-
-                <GitBranch
-                  size={22}
-                />
-
-              </div>
-
-
-              <div className="form-grid">
-
-                <label>
-
-                  <span>
-                    Change title
-                  </span>
-
-                  <input
-                    value={
-                      changeTitle
-                    }
-                    onChange={e =>
-                      setChangeTitle(
-                        e.target.value
-                      )
-                    }
-                  />
-
-                </label>
-
-
-                <label>
-
-                  <span>
-                    Old value
-                  </span>
-
-                  <input
-                    value={
-                      oldValue
-                    }
-                    onChange={e =>
-                      setOldValue(
-                        e.target.value
-                      )
-                    }
-                  />
-
-                </label>
-
-
-                <label>
-
-                  <span>
-                    New value
-                  </span>
-
-                  <input
-                    value={
-                      newValue
-                    }
-                    onChange={e =>
-                      setNewValue(
-                        e.target.value
-                      )
-                    }
-                  />
-
-                </label>
-
-              </div>
-
-
+            <div className="modal-actions">
               <button
-                className="primary-button analyze-button"
-                onClick={
-                  analyzeChange
-                }
-                disabled={
-                  loading
+                className="secondary-button"
+                onClick={() =>
+                  setShowOutcome(false)
                 }
               >
-
-                <Sparkles
-                  size={17}
-                />
-
-                {loading
-                  ? "Gemini analyzing..."
-                  : "Analyze Ripple"}
-
+                Cancel
               </button>
 
+              <button
+                className="primary-button"
+                onClick={recordOutcome}
+              >
+                <TrendingUp size={17} />
+                Record Outcome
+              </button>
             </div>
-
-
-            {loading && (
-
-              <div className="loading-panel">
-
-                <div className="loader" />
-
-                <div>
-
-                  <strong>
-                    Gemini is reasoning
-                    across your knowledge
-                    base
-                  </strong>
-
-                  <span>
-                    Checking every indexed
-                    section for semantic
-                    dependency.
-                  </span>
-
-                </div>
-
-              </div>
-
-            )}
-
-
-            {impacts.length >
-              0 && (
-
-              <>
-
-                <ImpactGraph
-                  impacts={
-                    impacts
-                  }
-                  oldValue={
-                    oldValue
-                  }
-                  newValue={
-                    newValue
-                  }
-                />
-
-
-                <div className="impact-results">
-
-                  <div className="impact-summary">
-
-                    <div>
-
-                      <span>
-                        DETECTED IMPACT
-                      </span>
-
-                      <strong>
-                        {
-                          affectedImpacts.length
-                        }
-                      </strong>
-
-                    </div>
-
-
-                    <div>
-
-                      <span>
-                        TOTAL SECTIONS
-                      </span>
-
-                      <strong>
-                        {
-                          impacts.length
-                        }
-                      </strong>
-
-                    </div>
-
-
-                    <div>
-
-                      <span>
-                        REVIEW NEEDED
-                      </span>
-
-                      <strong>
-                        {
-                          affectedImpacts
-                            .filter(
-                              item =>
-                                item.status ===
-                                "pending"
-                            )
-                            .length
-                        }
-                      </strong>
-
-                    </div>
-
-                  </div>
-
-
-                  {impacts.map(
-                    impact => (
-
-                      <ImpactCard
-                        key={
-                          impact.id
-                        }
-                        impact={
-                          impact
-                        }
-                        onUpdate={
-                          updateImpact
-                        }
-                      />
-
-                    )
-                  )}
-
-                </div>
-
-              </>
-            )}
-
-          </section>
-
+          </Modal>
         )}
-
-
-        {/* =================================================
-            REVIEW
-        ================================================= */}
-
-        {activeView ===
-          "review" && (
-
-          <section className="panel">
-
-            <div className="panel-heading">
-
-              <div>
-
-                <span className="section-kicker">
-                  HUMAN OVERSIGHT
-                </span>
-
-                <h3>
-                  Review Queue
-                </h3>
-
-              </div>
-
-              <CheckCircle2
-                size={22}
-              />
-
-            </div>
-
-
-            {impacts.filter(
-              item =>
-                item.affected &&
-                item.status ===
-                  "pending"
-            ).length === 0 ? (
-
-              <div className="empty">
-
-                <CheckCircle2
-                  size={32}
-                />
-
-                <strong>
-                  Review queue is clear
-                </strong>
-
-                <span>
-                  Run an impact analysis
-                  to generate review
-                  candidates.
-                </span>
-
-              </div>
-
-            ) : (
-
-              impacts
-                .filter(
-                  item =>
-                    item.affected &&
-                    item.status ===
-                      "pending"
-                )
-                .map(
-                  impact => (
-
-                    <ImpactCard
-                      key={
-                        impact.id
-                      }
-                      impact={
-                        impact
-                      }
-                      onUpdate={
-                        updateImpact
-                      }
-                    />
-
-                  )
-                )
-
-            )}
-
-          </section>
-
-        )}
-
-
-        {/* =================================================
-            CONFLICTS
-        ================================================= */}
-
-        {activeView ===
-          "conflicts" && (
-
-          <section className="panel">
-
-            <div className="panel-heading">
-
-              <div>
-
-                <span className="section-kicker">
-                  KNOWLEDGE CONSISTENCY
-                </span>
-
-                <h3>
-                  Conflict Detection
-                </h3>
-
-              </div>
-
-              <AlertTriangle
-                size={22}
-              />
-
-            </div>
-
-
-            <div className="empty">
-
-              <Network
-                size={32}
-              />
-
-              <strong>
-                Conflict engine ready
-              </strong>
-
-              <span>
-                Contradictory knowledge
-                will appear here as the
-                knowledge graph grows.
-              </span>
-
-            </div>
-
-          </section>
-
-        )}
-
-      </main>
 
     </div>
   );
@@ -1560,77 +946,1518 @@ function App() {
 
 
 /* ============================================================
-   NAV ITEM
-============================================================ */
+   COMMAND CENTER
+   ============================================================ */
 
-function NavItem({
-  icon,
-  label,
-  active,
-  onClick
+function CommandCenter({
+  dashboard,
+  patterns,
+  documents,
+  urgentCases,
+  onNavigate,
+  onDetectPatterns,
+  onDetectConflicts,
+  onUpload,
+  uploading,
+  auditLogs,
 }: {
-  icon: React.ReactNode;
-  label: string;
-  active: boolean;
-  onClick: () => void;
+  dashboard: Dashboard | null;
+  cases: CaseItem[];
+  patterns: Pattern[];
+  decisions: Decision[];
+  documents: DocumentItem[];
+  urgentCases: CaseItem[];
+  onNavigate: (view: View) => void;
+  onDetectPatterns: () => void;
+  onDetectConflicts: () => void;
+  onUpload: (
+    event: React.ChangeEvent<HTMLInputElement>
+  ) => void;
+  uploading: boolean;
+  auditLogs: AuditLog[];
 }) {
+  const score =
+    dashboard?.system_score ?? 0;
 
   return (
+    <div className="page">
 
+      <section className="hero">
+
+        <div>
+          <div className="eyebrow">
+            <span className="live-dot" />
+            LIVE ORGANIZATIONAL INTELLIGENCE
+          </div>
+
+          <h2>
+            See the problem.
+            <br />
+            <span>Understand the ripple.</span>
+          </h2>
+
+          <p>
+            RIPPLE connects evidence, knowledge,
+            patterns and possible consequences so
+            decision-makers can act with context.
+          </p>
+
+          <div className="hero-actions">
+            <button
+              className="primary-button large"
+              onClick={() =>
+                onNavigate("impact")
+              }
+            >
+              <Zap size={18} />
+              Open Impact Lab
+            </button>
+
+            <button
+              className="secondary-button large"
+              onClick={() =>
+                onNavigate("cases")
+              }
+            >
+              <Brain size={18} />
+              Investigate a Problem
+            </button>
+          </div>
+        </div>
+
+        <div className="score-card">
+
+          <div className="score-ring">
+            <div>
+              <strong>{score}</strong>
+              <span>/100</span>
+            </div>
+          </div>
+
+          <div>
+            <span className="muted">
+              System Pulse
+            </span>
+            <h3>
+              {score >= 80
+                ? "Healthy intelligence"
+                : score >= 60
+                ? "Needs attention"
+                : "High risk"}
+            </h3>
+            <p>
+              Based on knowledge risks,
+              decisions and active operational signals.
+            </p>
+          </div>
+
+        </div>
+
+      </section>
+
+      <section className="stat-grid">
+
+        <MetricCard
+          icon={<CircleAlert />}
+          label="Open Cases"
+          value={
+            dashboard?.open_cases ?? 0
+          }
+          sub="requiring investigation"
+          accent="danger"
+        />
+
+        <MetricCard
+          icon={<GitBranch />}
+          label="Emerging Patterns"
+          value={
+            dashboard?.patterns ?? 0
+          }
+          sub="signals detected"
+          accent="purple"
+        />
+
+        <MetricCard
+          icon={<AlertTriangle />}
+          label="Knowledge Risks"
+          value={
+            dashboard?.conflicts ?? 0
+          }
+          sub="potential conflicts"
+          accent="warning"
+        />
+
+        <MetricCard
+          icon={<ShieldCheck />}
+          label="Decisions Waiting"
+          value={
+            dashboard?.pending_decisions ?? 0
+          }
+          sub="manager action required"
+          accent="green"
+        />
+
+      </section>
+
+      <div className="dashboard-grid">
+
+        <section className="panel attention-panel">
+
+          <PanelHeader
+            title="Needs Attention"
+            subtitle="Signals RIPPLE thinks deserve review"
+            icon={<Target size={18} />}
+            action={
+              <button
+                className="text-button"
+                onClick={() =>
+                  onNavigate("cases")
+                }
+              >
+                View all
+                <ArrowRight size={14} />
+              </button>
+            }
+          />
+
+          {urgentCases.length === 0 ? (
+            <EmptyState
+              icon={<Check />}
+              title="No immediate cases"
+              text="RIPPLE has no critical operational signals right now."
+            />
+          ) : (
+            <div className="attention-list">
+              {urgentCases
+                .slice(0, 5)
+                .map((item) => (
+                  <div
+                    className="attention-row"
+                    key={item.id}
+                  >
+                    <div className="attention-icon">
+                      <AlertTriangle
+                        size={17}
+                      />
+                    </div>
+
+                    <div className="attention-main">
+                      <strong>
+                        {item.title}
+                      </strong>
+                      <span>
+                        {item.ai_summary ||
+                          item.description}
+                      </span>
+                    </div>
+
+                    <div className="attention-score">
+                      {Math.round(
+                        item.confidence
+                      )}
+                      %
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
+
+        </section>
+
+        <section className="panel pulse-panel">
+
+          <PanelHeader
+            title="RIPPLE Pulse"
+            subtitle="Current intelligence flow"
+            icon={<Activity size={18} />}
+          />
+
+          <div className="pulse-map">
+
+            <PulseNode
+              icon={<CircleAlert />}
+              label="Problems"
+              value={
+                dashboard?.cases ?? 0
+              }
+            />
+
+            <PulseArrow />
+
+            <PulseNode
+              icon={<Brain />}
+              label="Patterns"
+              value={
+                dashboard?.patterns ?? 0
+              }
+            />
+
+            <PulseArrow />
+
+            <PulseNode
+              icon={<Network />}
+              label="Connections"
+              value={
+                dashboard?.impacts ?? 0
+              }
+            />
+
+            <PulseArrow />
+
+            <PulseNode
+              icon={<ShieldCheck />}
+              label="Decisions"
+              value={
+                dashboard?.pending_decisions ??
+                0
+              }
+            />
+
+          </div>
+
+        </section>
+
+      </div>
+
+      <div className="dashboard-grid lower">
+
+        <section className="panel">
+
+          <PanelHeader
+            title="Emerging Intelligence"
+            subtitle="Recurring signals across investigations"
+            icon={<GitBranch size={18} />}
+            action={
+              <button
+                className="secondary-small"
+                onClick={onDetectPatterns}
+              >
+                <RefreshCw size={14} />
+                Scan patterns
+              </button>
+            }
+          />
+
+          {patterns.length === 0 ? (
+            <EmptyState
+              icon={<Search />}
+              title="No patterns yet"
+              text="Run pattern detection after adding several cases."
+            />
+          ) : (
+            <div className="pattern-list">
+              {patterns
+                .slice(0, 4)
+                .map((pattern) => (
+                  <div
+                    className="pattern-item"
+                    key={pattern.id}
+                  >
+                    <div className="pattern-icon">
+                      <GitBranch size={16} />
+                    </div>
+
+                    <div>
+                      <strong>
+                        {pattern.title}
+                      </strong>
+
+                      <p>
+                        {pattern.description}
+                      </p>
+
+                      <div className="pattern-meta">
+                        <span>
+                          {pattern.case_count} cases
+                        </span>
+                        <span>
+                          {Math.round(
+                            pattern.confidence
+                          )}
+                          % confidence
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
+
+        </section>
+
+        <section className="panel">
+
+          <PanelHeader
+            title="Knowledge & Evidence"
+            subtitle="The context RIPPLE can reason over"
+            icon={<Layers3 size={18} />}
+          />
+
+          <div className="knowledge-number">
+            <strong>
+              {documents.length}
+            </strong>
+            <span>
+              knowledge sources
+            </span>
+          </div>
+
+          <div className="knowledge-actions">
+
+            <label className="upload-zone">
+              <Upload size={18} />
+              <span>
+                {uploading
+                  ? "Processing..."
+                  : "Upload PDF / DOCX / TXT"}
+              </span>
+
+              <input
+                type="file"
+                accept=".pdf,.docx,.txt,.md"
+                onChange={onUpload}
+                hidden
+                disabled={uploading}
+              />
+            </label>
+
+            <button
+              className="secondary-button"
+              onClick={onDetectConflicts}
+            >
+              <AlertTriangle size={16} />
+              Scan conflicts
+            </button>
+
+          </div>
+
+        </section>
+
+      </div>
+
+      <section className="panel activity-panel">
+
+        <PanelHeader
+          title="Recent System Activity"
+          subtitle="Auditable actions inside RIPPLE"
+          icon={<Clock3 size={18} />}
+        />
+
+        {auditLogs.length === 0 ? (
+          <EmptyState
+            icon={<Activity />}
+            title="No activity yet"
+            text="RIPPLE activity will appear here."
+          />
+        ) : (
+          <div className="activity-list">
+            {auditLogs
+              .slice(0, 8)
+              .map((log) => (
+                <div
+                  className="activity-row"
+                  key={log.id}
+                >
+                  <div className="activity-dot" />
+
+                  <div>
+                    <strong>
+                      {formatAction(log.action)}
+                    </strong>
+
+                    <span>
+                      {log.details ||
+                        `${log.target_type} ${log.target_id || ""}`}
+                    </span>
+                  </div>
+
+                  <time>
+                    {formatDate(
+                      log.created_at
+                    )}
+                  </time>
+                </div>
+              ))}
+          </div>
+        )}
+
+      </section>
+
+    </div>
+  );
+}
+
+
+/* ============================================================
+   CASES
+   ============================================================ */
+
+function CasesPage({
+  cases,
+  selectedCase,
+  onSelect,
+  onNew,
+  onDetectPatterns,
+}: {
+  cases: CaseItem[];
+  selectedCase: CaseItem | null;
+  onSelect: (item: CaseItem) => void;
+  onNew: () => void;
+  onDetectPatterns: () => void;
+}) {
+  const groups = [
+    "Immediate",
+    "High",
+    "Review",
+    "Low",
+  ];
+
+  return (
+    <div className="page">
+
+      <PageTitle
+        eyebrow="INVESTIGATION"
+        title="Cases"
+        description="Turn operational problems into structured investigations with evidence, hypotheses and recommended actions."
+        action={
+          <button
+            className="primary-button"
+            onClick={onNew}
+          >
+            <Plus size={17} />
+            New Investigation
+          </button>
+        }
+      />
+
+      <div className="case-toolbar">
+
+        <div className="search-box">
+          <Search size={16} />
+          <input
+            placeholder="Search investigations..."
+          />
+        </div>
+
+        <button
+          className="secondary-button"
+          onClick={onDetectPatterns}
+        >
+          <GitBranch size={16} />
+          Detect Patterns
+        </button>
+
+      </div>
+
+      <div className="case-columns">
+
+        {groups.map((group) => {
+
+          const items = cases.filter(
+            (item) =>
+              normalizePriority(
+                item.priority
+              ) === group
+          );
+
+          return (
+            <section
+              className="case-column"
+              key={group}
+            >
+
+              <div className="column-header">
+                <div>
+                  <span
+                    className={`priority-dot ${priorityClass(
+                      group
+                    )}`}
+                  />
+                  <strong>{group}</strong>
+                </div>
+
+                <span>
+                  {items.length}
+                </span>
+              </div>
+
+              {items.length === 0 ? (
+                <div className="empty-column">
+                  No cases
+                </div>
+              ) : (
+                items.map((item) => (
+                  <button
+                    className="case-card"
+                    key={item.id}
+                    onClick={() =>
+                      onSelect(item)
+                    }
+                  >
+                    <div className="case-card-top">
+                      <span
+                        className={`priority-badge ${priorityClass(
+                          item.priority
+                        )}`}
+                      >
+                        {item.priority}
+                      </span>
+
+                      <span>
+                        #{String(
+                          item.id
+                        ).padStart(4, "0")}
+                      </span>
+                    </div>
+
+                    <h3>
+                      {item.title}
+                    </h3>
+
+                    <p>
+                      {item.ai_summary ||
+                        item.description}
+                    </p>
+
+                    <div className="case-card-bottom">
+                      <span>
+                        {item.category}
+                      </span>
+
+                      <span>
+                        AI {Math.round(
+                          item.confidence
+                        )}
+                        %
+                      </span>
+                    </div>
+                  </button>
+                ))
+              )}
+
+            </section>
+          );
+        })}
+
+      </div>
+
+      {selectedCase && (
+        <CaseDrawer
+          item={selectedCase}
+          onClose={() =>
+            onSelect(null as any)
+          }
+        />
+      )}
+
+    </div>
+  );
+}
+
+
+/* ============================================================
+   CASE DRAWER
+   ============================================================ */
+
+function CaseDrawer({
+  item,
+  onClose,
+}: {
+  item: CaseItem;
+  onClose: () => void;
+}) {
+  let causes = item.root_cause;
+
+  if (!Array.isArray(causes)) {
+    causes = [];
+  }
+
+  return (
+    <div className="drawer-backdrop">
+
+      <div className="case-drawer">
+
+        <div className="drawer-header">
+
+          <div>
+            <span className="eyebrow">
+              INVESTIGATION #{item.id}
+            </span>
+
+            <h2>{item.title}</h2>
+          </div>
+
+          <button
+            className="icon-button"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
+
+        </div>
+
+        <div className="drawer-content">
+
+          <div className="case-intelligence">
+
+            <IntelligenceStep
+              number="01"
+              icon={<CircleAlert />}
+              title="What happened?"
+              text={item.description}
+            />
+
+            <IntelligenceStep
+              number="02"
+              icon={<Brain />}
+              title="AI understanding"
+              text={
+                item.ai_summary ||
+                "RIPPLE is analyzing the available context."
+              }
+            />
+
+            <div className="confidence-box">
+
+              <div>
+                <span>AI confidence</span>
+                <strong>
+                  {Math.round(
+                    item.confidence
+                  )}
+                  %
+                </strong>
+              </div>
+
+              <div className="confidence-bar">
+                <span
+                  style={{
+                    width: `${Math.min(
+                      100,
+                      item.confidence
+                    )}%`,
+                  }}
+                />
+              </div>
+
+            </div>
+
+            <IntelligenceStep
+              number="03"
+              icon={<Lightbulb />}
+              title="Possible root causes"
+              text=""
+            />
+
+            <div className="cause-list">
+              {causes.length === 0 ? (
+                <div className="small-empty">
+                  No root-cause hypotheses
+                  available yet.
+                </div>
+              ) : (
+                causes.map(
+                  (cause: any, index: number) => (
+                    <div
+                      className="cause-card"
+                      key={index}
+                    >
+                      <div className="cause-number">
+                        H{index + 1}
+                      </div>
+
+                      <div>
+                        <strong>
+                          {cause.hypothesis ||
+                            cause.title ||
+                            "Possible cause"}
+                        </strong>
+
+                        {cause.evidence && (
+                          <p>
+                            {cause.evidence}
+                          </p>
+                        )}
+
+                        {cause.confidence != null && (
+                          <span>
+                            {Math.round(
+                              Number(
+                                cause.confidence
+                              )
+                            )}
+                            % confidence
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                )
+              )}
+            </div>
+
+            <IntelligenceStep
+              number="04"
+              icon={<Target />}
+              title="Recommended action"
+              text={
+                item.recommendation ||
+                "No recommendation available."
+              }
+              final
+            />
+
+          </div>
+
+        </div>
+
+        <div className="drawer-footer">
+          <button
+            className="secondary-button"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+
+      </div>
+
+    </div>
+  );
+}
+
+
+/* ============================================================
+   IMPACT LAB
+   ============================================================ */
+
+function ImpactLab({
+  form,
+  setForm,
+  onRun,
+  simulation,
+  onDecision,
+  loading,
+  documents,
+}: {
+  form: {
+    title: string;
+    scenario: string;
+  };
+  setForm: React.Dispatch<
+    React.SetStateAction<{
+      title: string;
+      scenario: string;
+    }>
+  >;
+  onRun: () => void;
+  simulation: SimulationResult | null;
+  onDecision: (
+    option: SimulationOption
+  ) => void;
+  loading: boolean;
+  documents: DocumentItem[];
+}) {
+  return (
+    <div className="page">
+
+      <PageTitle
+        eyebrow="SIMULATION ENGINE"
+        title="Impact Lab"
+        description="Ask RIPPLE what could happen before you make the change."
+      />
+
+      <section className="what-if-card">
+
+        <div className="what-if-header">
+
+          <div className="what-if-icon">
+            <Zap size={23} />
+          </div>
+
+          <div>
+            <span>WHAT IF?</span>
+            <h2>
+              Simulate a decision
+            </h2>
+          </div>
+
+        </div>
+
+        <div className="simulation-form">
+
+          <label>
+            Problem / decision
+            <input
+              value={form.title}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  title: e.target.value,
+                })
+              }
+              placeholder="e.g. Order processing delays increased 38%"
+            />
+          </label>
+
+          <label>
+            Proposed change
+            <textarea
+              value={form.scenario}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  scenario: e.target.value,
+                })
+              }
+              placeholder="e.g. What if we introduce a controlled automated approval step?"
+              rows={5}
+            />
+          </label>
+
+          <div className="simulation-footer">
+
+            <div className="context-info">
+              <Layers3 size={16} />
+              <span>
+                Simulation context:
+                <strong>
+                  {documents.length}
+                </strong>{" "}
+                knowledge sources
+              </span>
+            </div>
+
+            <button
+              className="primary-button large"
+              onClick={onRun}
+              disabled={loading}
+            >
+              <Play size={17} />
+              {loading
+                ? "Simulating..."
+                : "Run RIPPLE Simulation"}
+            </button>
+
+          </div>
+
+        </div>
+
+      </section>
+
+      {simulation && (
+        <section className="simulation-result">
+
+          <div className="simulation-title">
+
+            <div>
+              <span className="eyebrow">
+                RIPPLE SIMULATION COMPLETE
+              </span>
+
+              <h2>
+                Possible paths forward
+              </h2>
+
+              <p>
+                These are estimated consequences,
+                not guaranteed outcomes.
+              </p>
+            </div>
+
+            <div className="overall-risk">
+              <span>Overall risk</span>
+              <strong>
+                {Math.round(
+                  simulation.overall_risk
+                )}
+              </strong>
+              <small>/100</small>
+            </div>
+
+          </div>
+
+          <div className="option-grid">
+
+            {simulation.options.map(
+              (option, index) => {
+
+                const recommended =
+                  option.name ===
+                  simulation.recommended_option;
+
+                return (
+                  <div
+                    className={`option-card ${
+                      recommended
+                        ? "recommended"
+                        : ""
+                    }`}
+                    key={index}
+                  >
+
+                    {recommended && (
+                      <div className="recommended-label">
+                        <Sparkles size={13} />
+                        RIPPLE RECOMMENDS
+                      </div>
+                    )}
+
+                    <div className="option-number">
+                      OPTION {String(
+                        index + 1
+                      ).padStart(2, "0")}
+                    </div>
+
+                    <h3>
+                      {option.name}
+                    </h3>
+
+                    <div className="option-metrics">
+
+                      <RiskMetric
+                        label="Risk"
+                        value={option.risk}
+                      />
+
+                      <RiskMetric
+                        label="Impact"
+                        value={option.impact}
+                      />
+
+                      <RiskMetric
+                        label="Confidence"
+                        value={
+                          option.confidence
+                        }
+                      />
+
+                    </div>
+
+                    <p className="option-reason">
+                      {option.reason}
+                    </p>
+
+                    <div className="affected-list">
+                      <span>
+                        AFFECTED AREAS
+                      </span>
+
+                      {option.affected_areas
+                        .slice(0, 4)
+                        .map(
+                          (
+                            area,
+                            areaIndex
+                          ) => (
+                            <div
+                              key={areaIndex}
+                            >
+                              <Network
+                                size={13}
+                              />
+                              {area}
+                            </div>
+                          )
+                        )}
+                    </div>
+
+                    <div className="consequence-list">
+                      <span>
+                        POSSIBLE CONSEQUENCES
+                      </span>
+
+                      {option.consequences
+                        .slice(0, 3)
+                        .map(
+                          (
+                            consequence,
+                            consequenceIndex
+                          ) => (
+                            <div
+                              key={
+                                consequenceIndex
+                              }
+                            >
+                              <ChevronRight
+                                size={13}
+                              />
+                              {consequence}
+                            </div>
+                          )
+                        )}
+                    </div>
+
+                    <button
+                      className={
+                        recommended
+                          ? "primary-button full-button"
+                          : "secondary-button full-button"
+                      }
+                      onClick={() =>
+                        onDecision(option)
+                      }
+                    >
+                      Send to Decision Room
+                      <ArrowRight size={15} />
+                    </button>
+
+                  </div>
+                );
+              }
+            )}
+
+          </div>
+
+          <div className="recommendation-banner">
+
+            <div className="recommendation-icon">
+              <Brain size={21} />
+            </div>
+
+            <div>
+              <span>
+                AI RECOMMENDATION
+              </span>
+
+              <strong>
+                {simulation.recommended_option}
+              </strong>
+
+              <p>
+                {simulation.recommendation_reason}
+              </p>
+            </div>
+
+          </div>
+
+        </section>
+      )}
+
+    </div>
+  );
+}
+
+
+/* ============================================================
+   DECISION ROOM
+   ============================================================ */
+
+function DecisionRoom({
+  decisions,
+  selected,
+  setSelected,
+  manager,
+  setManager,
+  pin,
+  setPin,
+  onApprove,
+  onReject,
+  onOutcome,
+  loading,
+}: {
+  decisions: Decision[];
+  selected: Decision | null;
+  setSelected: (
+    decision: Decision | null
+  ) => void;
+  manager: string;
+  setManager: (
+    value: string
+  ) => void;
+  pin: string;
+  setPin: (value: string) => void;
+  onApprove: () => void;
+  onReject: (id: number) => void;
+  onOutcome: () => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="page">
+
+      <PageTitle
+        eyebrow="AUTHORIZED DECISIONS"
+        title="Decision Room"
+        description="AI can recommend. Authorized humans decide."
+      />
+
+      <div className="decision-banner">
+
+        <ShieldCheck size={21} />
+
+        <div>
+          <strong>
+            Human-in-the-loop protection
+          </strong>
+
+          <span>
+            RIPPLE never executes an official
+            operational decision without authorization.
+          </span>
+        </div>
+
+      </div>
+
+      <div className="decision-layout">
+
+        <section className="decision-list">
+
+          <div className="section-heading">
+            <div>
+              <h3>Decision queue</h3>
+              <span>
+                {decisions.filter(
+                  (d) =>
+                    d.status === "pending"
+                ).length}{" "}
+                awaiting review
+              </span>
+            </div>
+          </div>
+
+          {decisions.length === 0 ? (
+            <EmptyState
+              icon={<ShieldCheck />}
+              title="Decision room is clear"
+              text="Run a simulation and send an option here for manager review."
+            />
+          ) : (
+            decisions.map((decision) => (
+              <button
+                className={`decision-card ${
+                  selected?.id === decision.id
+                    ? "selected"
+                    : ""
+                }`}
+                key={decision.id}
+                onClick={() =>
+                  setSelected(decision)
+                }
+              >
+
+                <div className="decision-card-top">
+
+                  <span
+                    className={`status-pill ${decision.status}`}
+                  >
+                    {decision.status}
+                  </span>
+
+                  <span>
+                    D-{String(
+                      decision.id
+                    ).padStart(4, "0")}
+                  </span>
+
+                </div>
+
+                <h3>
+                  {decision.title}
+                </h3>
+
+                <p>
+                  {decision.action}
+                </p>
+
+                <div className="decision-card-bottom">
+                  <span>
+                    Risk {Math.round(
+                      decision.risk
+                    )}
+                    /100
+                  </span>
+
+                  <ChevronRight size={15} />
+                </div>
+
+              </button>
+            ))
+          )}
+
+        </section>
+
+        <section className="decision-detail">
+
+          {!selected ? (
+            <div className="decision-empty">
+              <div className="decision-empty-icon">
+                <Lock size={27} />
+              </div>
+
+              <h2>
+                Select a decision
+              </h2>
+
+              <p>
+                Review the AI recommendation,
+                risk and proposed action before
+                authorizing execution.
+              </p>
+            </div>
+          ) : (
+            <>
+
+              <div className="detail-header">
+
+                <div>
+                  <span className="eyebrow">
+                    DECISION D-
+                    {String(
+                      selected.id
+                    ).padStart(4, "0")}
+                  </span>
+
+                  <h2>
+                    {selected.title}
+                  </h2>
+                </div>
+
+                <span
+                  className={`status-pill ${selected.status}`}
+                >
+                  {selected.status}
+                </span>
+
+              </div>
+
+              <div className="decision-summary-grid">
+
+                <div className="decision-summary">
+                  <span>
+                    PROPOSED ACTION
+                  </span>
+                  <strong>
+                    {selected.action}
+                  </strong>
+                </div>
+
+                <div className="decision-summary">
+                  <span>
+                    ESTIMATED RISK
+                  </span>
+                  <strong>
+                    {Math.round(
+                      selected.risk
+                    )}
+                    /100
+                  </strong>
+                </div>
+
+              </div>
+
+              <div className="ai-recommendation">
+
+                <div className="recommendation-icon">
+                  <Sparkles size={19} />
+                </div>
+
+                <div>
+                  <span>
+                    AI RECOMMENDATION
+                  </span>
+
+                  <p>
+                    {selected.recommendation ||
+                      "Review available evidence before making the decision."}
+                  </p>
+                </div>
+
+              </div>
+
+              {selected.status ===
+              "pending" ? (
+                <div className="approval-box">
+
+                  <div className="approval-title">
+                    <Lock size={18} />
+                    <div>
+                      <strong>
+                        Manager authorization
+                      </strong>
+                      <span>
+                        Enter the approval credential
+                        to authorize execution.
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="approval-form">
+
+                    <label>
+                      Manager
+                      <input
+                        value={manager}
+                        onChange={(e) =>
+                          setManager(
+                            e.target.value
+                          )
+                        }
+                      />
+                    </label>
+
+                    <label>
+                      Approval PIN
+                      <input
+                        value={pin}
+                        maxLength={4}
+                        inputMode="numeric"
+                        type="password"
+                        onChange={(e) =>
+                          setPin(
+                            e.target.value.replace(
+                              /\D/g,
+                              ""
+                            )
+                          )
+                        }
+                        placeholder="••••"
+                      />
+                    </label>
+
+                  </div>
+
+                  <div className="approval-actions">
+
+                    <button
+                      className="danger-button"
+                      onClick={() =>
+                        onReject(
+                          selected.id
+                        )
+                      }
+                      disabled={loading}
+                    >
+                      <X size={16} />
+                      Reject
+                    </button>
+
+                    <button
+                      className="primary-button"
+                      onClick={onApprove}
+                      disabled={
+                        loading ||
+                        pin.length !== 4
+                      }
+                    >
+                      <Check size={16} />
+                      Authorize & Execute
+                    </button>
+
+                  </div>
+
+                  <div className="demo-note">
+                    Demo authorization PIN:
+                    <strong>2468</strong>
+                  </div>
+
+                </div>
+              ) : (
+                <div className="approved-box">
+
+                  <div className="approved-icon">
+                    <Check size={21} />
+                  </div>
+
+                  <div>
+                    <strong>
+                      Decision authorized
+                    </strong>
+
+                    <span>
+                      Approved by{" "}
+                      {selected.approved_by ||
+                        "Manager"}{" "}
+                      on{" "}
+                      {formatDate(
+                        selected.decided_at
+                      )}
+                    </span>
+                  </div>
+
+                  <button
+                    className="secondary-button"
+                    onClick={onOutcome}
+                  >
+                    <BarChart3 size={16} />
+                    Record Result
+                  </button>
+
+                </div>
+              )}
+
+            </>
+          )}
+
+        </section>
+
+      </div>
+
+    </div>
+  );
+}
+
+
+/* ============================================================
+   REUSABLE UI
+   ============================================================ */
+
+function NavButton({
+  active,
+  icon,
+  label,
+  badge,
+  onClick,
+}: {
+  active: boolean;
+  icon: React.ReactNode;
+  label: string;
+  badge?: string;
+  onClick: () => void;
+}) {
+  return (
     <button
-      className={
-        active
-          ? "nav-item active"
-          : "nav-item"
-      }
-      onClick={
-        onClick
-      }
+      className={`nav-button ${
+        active ? "active" : ""
+      }`}
+      onClick={onClick}
     >
-
       {icon}
+      <span>{label}</span>
 
-      <span>
-        {label}
-      </span>
-
+      {badge && (
+        <b>{badge}</b>
+      )}
     </button>
   );
 }
 
 
-/* ============================================================
-   STAT
-============================================================ */
-
-function Stat({
+function MetricCard({
+  icon,
   label,
   value,
-  icon
+  sub,
+  accent,
 }: {
+  icon: React.ReactNode;
   label: string;
   value: number;
-  icon: React.ReactNode;
+  sub: string;
+  accent: string;
 }) {
-
   return (
+    <div className="metric-card">
 
-    <div className="stat-card">
-
-      <div className="stat-icon">
+      <div
+        className={`metric-icon ${accent}`}
+      >
         {icon}
       </div>
 
       <div>
-
-        <span>
-          {label}
-        </span>
-
-        <strong>
-          {value}
-        </strong>
-
+        <span>{label}</span>
+        <strong>{value}</strong>
+        <small>{sub}</small>
       </div>
 
     </div>
@@ -1638,108 +2465,197 @@ function Stat({
 }
 
 
-/* ============================================================
-   ACTIVITY
-============================================================ */
+function PanelHeader({
+  title,
+  subtitle,
+  icon,
+  action,
+}: {
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="panel-header">
 
-function ActivityRow({
+      <div className="panel-title">
+
+        <div className="panel-title-icon">
+          {icon}
+        </div>
+
+        <div>
+          <h3>{title}</h3>
+          <span>{subtitle}</span>
+        </div>
+
+      </div>
+
+      {action}
+
+    </div>
+  );
+}
+
+
+function PageTitle({
+  eyebrow,
+  title,
+  description,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="page-title">
+
+      <div>
+        <span className="eyebrow">
+          {eyebrow}
+        </span>
+
+        <h2>{title}</h2>
+
+        <p>{description}</p>
+      </div>
+
+      {action}
+
+    </div>
+  );
+}
+
+
+function EmptyState({
+  icon,
+  title,
+  text,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className="empty-state">
+
+      <div className="empty-icon">
+        {icon}
+      </div>
+
+      <strong>{title}</strong>
+
+      <span>{text}</span>
+
+    </div>
+  );
+}
+
+
+function PulseNode({
+  icon,
   label,
-  value
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+}) {
+  return (
+    <div className="pulse-node">
+
+      <div>
+        {icon}
+      </div>
+
+      <span>{label}</span>
+
+      <strong>{value}</strong>
+
+    </div>
+  );
+}
+
+
+function PulseArrow() {
+  return (
+    <div className="pulse-arrow">
+      <ArrowRight size={15} />
+    </div>
+  );
+}
+
+
+function IntelligenceStep({
+  number,
+  icon,
+  title,
+  text,
+  final,
+}: {
+  number: string;
+  icon: React.ReactNode;
+  title: string;
+  text: string;
+  final?: boolean;
+}) {
+  return (
+    <div
+      className={`intelligence-step ${
+        final ? "final" : ""
+      }`}
+    >
+
+      <div className="step-number">
+        {number}
+      </div>
+
+      <div className="step-icon">
+        {icon}
+      </div>
+
+      <div className="step-body">
+        <span>{title}</span>
+
+        {text && (
+          <p>{text}</p>
+        )}
+      </div>
+
+    </div>
+  );
+}
+
+
+function RiskMetric({
+  label,
+  value,
 }: {
   label: string;
   value: number;
 }) {
+  const score =
+    Math.max(0, Math.min(100, value));
 
   return (
+    <div className="risk-metric">
 
-    <div className="activity-row">
-
-      <span>
-        {label}
-      </span>
-
-      <strong>
-        {value}
-      </strong>
-
-    </div>
-  );
-}
-
-
-/* ============================================================
-   RIPPLE GRAPHIC
-============================================================ */
-
-function RippleGraphic() {
-
-  return (
-
-    <div className="ripple-graphic">
-
-      <div className="orbit orbit-one" />
-
-      <div className="orbit orbit-two" />
-
-      <div className="orbit orbit-three" />
-
-
-      <div className="graph-line line-one" />
-
-      <div className="graph-line line-two" />
-
-      <div className="graph-line line-three" />
-
-      <div className="graph-line line-four" />
-
-
-      <div className="graph-node node-center">
-
-        <Sparkles
-          size={23}
-        />
-
+      <div>
+        <span>{label}</span>
+        <strong>
+          {Math.round(score)}
+        </strong>
       </div>
 
-
-      <div className="graph-node node-one">
-
-        <FileText
-          size={17}
+      <div className="risk-bar">
+        <span
+          style={{
+            width: `${score}%`,
+          }}
         />
-
-      </div>
-
-
-      <div className="graph-node node-two">
-
-        <Network
-          size={17}
-        />
-
-      </div>
-
-
-      <div className="graph-node node-three">
-
-        <GitBranch
-          size={17}
-        />
-
-      </div>
-
-
-      <div className="graph-node node-four">
-
-        <ShieldCheck
-          size={17}
-        />
-
-      </div>
-
-
-      <div className="graph-label">
-        KNOWLEDGE GRAPH
       </div>
 
     </div>
@@ -1747,544 +2663,140 @@ function RippleGraphic() {
 }
 
 
-/* ============================================================
-   IMPACT GRAPH
-============================================================ */
-
-function ImpactGraph({
-  impacts,
-  oldValue,
-  newValue
+function Modal({
+  title,
+  subtitle,
+  children,
+  onClose,
 }: {
-  impacts: Impact[];
-  oldValue: string;
-  newValue: string;
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+  onClose: () => void;
 }) {
-
-  const affected =
-    impacts.filter(
-      item => item.affected
-    );
-
-
-  const nodes: Node[] = [];
-
-  const edges: Edge[] = [];
-
-
-  nodes.push({
-    id: "change",
-
-    position: {
-      x: 430,
-      y: 20
-    },
-
-    data: {
-      label: (
-        <div className="flow-card flow-change">
-
-          <Handle
-            type="source"
-            position={
-              Position.Bottom
-            }
-          />
-
-          <small>
-            CHANGE DETECTED
-          </small>
-
-          <strong>
-            {oldValue}
-            {" → "}
-            {newValue}
-          </strong>
-
-        </div>
-      )
-    },
-
-    style: {
-      background:
-        "transparent",
-
-      border: "none",
-
-      width: 220
-    }
-  });
-
-
-  affected.forEach(
-    (impact, index) => {
-
-      const documentId =
-        `document-${impact.document_id}-${index}`;
-
-      const sectionId =
-        `section-${impact.id}`;
-
-
-      const column =
-        index % 3;
-
-      const row =
-        Math.floor(index / 3);
-
-
-      const x =
-        40 +
-        column * 300;
-
-      const documentY =
-        180 +
-        row * 300;
-
-      const sectionY =
-        documentY + 145;
-
-
-      nodes.push({
-        id: documentId,
-
-        position: {
-          x,
-          y: documentY
-        },
-
-        data: {
-          label: (
-            <div className="flow-card flow-document">
-
-              <Handle
-                type="target"
-                position={
-                  Position.Top
-                }
-              />
-
-              <Handle
-                type="source"
-                position={
-                  Position.Bottom
-                }
-              />
-
-              <small>
-                DOCUMENT
-              </small>
-
-              <strong>
-                {
-                  impact.document_name
-                }
-              </strong>
-
-            </div>
-          )
-        },
-
-        style: {
-          background:
-            "transparent",
-
-          border: "none",
-
-          width: 220
-        }
-      });
-
-
-      nodes.push({
-        id: sectionId,
-
-        position: {
-          x,
-          y: sectionY
-        },
-
-        data: {
-          label: (
-            <div className="flow-card flow-affected">
-
-              <Handle
-                type="target"
-                position={
-                  Position.Top
-                }
-              />
-
-              <small>
-                {impact.page_number
-                  ? `PAGE ${impact.page_number}`
-                  : "SECTION"}
-              </small>
-
-              <strong>
-                {
-                  impact.section_title
-                }
-              </strong>
-
-              <span>
-                {Math.round(
-                  impact.confidence *
-                    100
-                )}
-                % confidence
-              </span>
-
-            </div>
-          )
-        },
-
-        style: {
-          background:
-            "transparent",
-
-          border: "none",
-
-          width: 220
-        }
-      });
-
-
-      edges.push({
-        id:
-          `change-${documentId}`,
-
-        source:
-          "change",
-
-        target:
-          documentId,
-
-        animated: true
-      });
-
-
-      edges.push({
-        id:
-          `${documentId}-${sectionId}`,
-
-        source:
-          documentId,
-
-        target:
-          sectionId,
-
-        animated: true
-      });
-
-    }
-  );
-
-
   return (
+    <div className="modal-backdrop">
 
-    <div className="graph-container">
+      <div className="modal">
 
-      <div className="graph-header">
-
-        <div>
-
-          <span className="section-kicker">
-            KNOWLEDGE DEPENDENCY GRAPH
-          </span>
-
-          <h3>
-            Ripple Map
-          </h3>
-
-        </div>
-
-
-        <div className="graph-count">
-
-          {affected.length}
-          {" affected"}
-
-        </div>
-
-      </div>
-
-
-      <div className="graph">
-
-        {affected.length ===
-        0 ? (
-
-          <div className="graph-empty">
-
-            <CheckCircle2
-              size={32}
-            />
-
-            <strong>
-              No downstream impact
-            </strong>
-
-            <span>
-              Gemini did not detect
-              affected sections.
-            </span>
-
-          </div>
-
-        ) : (
-
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            fitView
-            fitViewOptions={{
-              padding: 0.25
-            }}
-          >
-
-            <Background />
-
-            <Controls />
-
-            <MiniMap />
-
-          </ReactFlow>
-
-        )}
-
-      </div>
-
-    </div>
-  );
-}
-
-
-/* ============================================================
-   IMPACT CARD
-============================================================ */
-
-function ImpactCard({
-  impact,
-  onUpdate
-}: {
-  impact: Impact;
-
-  onUpdate: (
-    id: number,
-    status: string
-  ) => void;
-}) {
-
-  const confidence =
-    Math.round(
-      impact.confidence *
-        100
-    );
-
-
-  return (
-
-    <article
-      className={
-        impact.affected
-          ? "impact-card affected"
-          : "impact-card"
-      }
-    >
-
-      <div className="impact-top">
-
-        <div>
-
-          <div className="impact-file">
-
-            <FileText
-              size={16}
-            />
-
-            {
-              impact.document_name
-            }
-
-          </div>
-
-
-          <h4>
-            {
-              impact.section_title
-            }
-          </h4>
-
-        </div>
-
-
-        <div
-          className={
-            impact.affected
-              ? "impact-badge danger"
-              : "impact-badge safe"
-          }
-        >
-
-          {impact.affected
-            ? (
-              <AlertTriangle
-                size={14}
-              />
-            )
-            : (
-              <Check
-                size={14}
-              />
-            )}
-
-          {impact.affected
-            ? "AFFECTED"
-            : "NO IMPACT"}
-
-        </div>
-
-      </div>
-
-
-      <div className="impact-grid">
-
-        <div>
-
-          <span className="impact-label">
-            LOCATION
-          </span>
-
-          <p>
-            {impact.page_number
-              ? `Page ${impact.page_number}`
-              : "Document section"}
-          </p>
-
-        </div>
-
-
-        <div>
-
-          <span className="impact-label">
-            CONFIDENCE
-          </span>
-
-          <p>
-            {confidence}%
-          </p>
-
-        </div>
-
-
-        <div className="why">
-
-          <span className="impact-label">
-            WHY IS THIS AFFECTED?
-          </span>
-
-          <p>
-            {impact.reason}
-          </p>
-
-        </div>
-
-      </div>
-
-
-      {impact.affected &&
-        impact.suggested_fix && (
-
-        <div className="suggested-fix">
-
-          <div className="fix-header">
-
-            <Sparkles
-              size={15}
-            />
-
-            AI SUGGESTED FIX
-
-          </div>
-
-
-          <p>
-            {
-              impact.suggested_fix
-            }
-          </p>
-
-        </div>
-      )}
-
-
-      {impact.affected && (
-
-        <div className="review-actions">
-
-          <span>
-
-            STATUS:{" "}
-
-            <strong>
-              {
-                impact.status
-                  .toUpperCase()
-              }
-            </strong>
-
-          </span>
-
+        <div className="modal-header">
 
           <div>
+            <span className="eyebrow">
+              RIPPLE
+            </span>
 
-            <button
-              className="reject-button"
-              onClick={() =>
-                onUpdate(
-                  impact.id,
-                  "rejected"
-                )
-              }
-            >
+            <h2>{title}</h2>
 
-              <XCircle
-                size={15}
-              />
-
-              Reject
-
-            </button>
-
-
-            <button
-              className="approve-button"
-              onClick={() =>
-                onUpdate(
-                  impact.id,
-                  "approved"
-                )
-              }
-            >
-
-              <CheckCircle2
-                size={15}
-              />
-
-              Approve
-
-            </button>
-
+            <p>{subtitle}</p>
           </div>
+
+          <button
+            className="icon-button"
+            onClick={onClose}
+          >
+            <X size={18} />
+          </button>
 
         </div>
 
-      )}
+        <div className="modal-body">
+          {children}
+        </div>
 
-    </article>
+      </div>
+
+    </div>
   );
 }
 
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+
+function normalizePriority(
+  priority: string
+) {
+  const value =
+    priority?.toLowerCase() || "";
+
+  if (
+    value.includes("critical") ||
+    value.includes("immediate")
+  ) {
+    return "Immediate";
+  }
+
+  if (value.includes("high")) {
+    return "High";
+  }
+
+  if (value.includes("low")) {
+    return "Low";
+  }
+
+  return "Review";
+}
+
+
+function priorityClass(
+  priority: string
+) {
+  const value =
+    priority?.toLowerCase() || "";
+
+  if (
+    value.includes("critical") ||
+    value.includes("immediate")
+  ) {
+    return "immediate";
+  }
+
+  if (value.includes("high")) {
+    return "high";
+  }
+
+  if (value.includes("low")) {
+    return "low";
+  }
+
+  return "review";
+}
+
+
+function formatDate(
+  value?: string
+) {
+  if (!value) return "—";
+
+  try {
+    return new Date(value).toLocaleString(
+      undefined,
+      {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }
+    );
+  } catch {
+    return value;
+  }
+}
+
+
+function formatAction(
+  value: string
+) {
+  return value
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .replace(
+      /^\w/,
+      (letter) =>
+        letter.toUpperCase()
+    );
+}
 
 export default App;

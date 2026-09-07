@@ -1,9 +1,11 @@
 import os
 import re
 import json
-import shutil
 import sqlite3
+import hashlib
+from datetime import datetime
 from pathlib import Path
+from typing import Optional, List
 
 import fitz
 from docx import Document as DocxDocument
@@ -18,77 +20,38 @@ from google.genai import types
 
 
 # ============================================================
-# CONFIG
+# RIPPLE — AI INVESTIGATION & DECISION INTELLIGENCE
 # ============================================================
 
-load_dotenv()
-
 BASE_DIR = Path(__file__).resolve().parent
-
 UPLOAD_DIR = BASE_DIR / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
 
-DATABASE_PATH = BASE_DIR / "ripple.db"
+DB_PATH = BASE_DIR / "ripple.db"
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+load_dotenv(BASE_DIR / ".env")
 
-GEMINI_MODEL = os.getenv(
-    "GEMINI_MODEL",
-    "gemini-2.5-flash"
-)
-
-
-# ============================================================
-# GEMINI
-# ============================================================
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 gemini_client = None
 
 if GEMINI_API_KEY:
-
     try:
+        gemini_client = genai.Client(api_key=GEMINI_API_KEY)
+    except Exception:
+        gemini_client = None
 
-        gemini_client = genai.Client(
-            api_key=GEMINI_API_KEY
-        )
-
-        print("================================")
-        print("RIPPLE GEMINI AI: CONNECTED")
-        print("MODEL:", GEMINI_MODEL)
-        print("================================")
-
-    except Exception as error:
-
-        print(
-            "Gemini initialization error:",
-            error
-        )
-
-else:
-
-    print("================================")
-    print("WARNING: GEMINI_API_KEY NOT FOUND")
-    print("Using local fallback engine.")
-    print("================================")
-
-
-# ============================================================
-# FASTAPI
-# ============================================================
 
 app = FastAPI(
-    title="RIPPLE API",
-    description="AI Knowledge Impact & Change Intelligence Platform",
+    title="RIPPLE",
+    description="AI Investigation & Decision Intelligence Platform",
     version="1.0.0"
 )
 
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173"
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -99,89 +62,190 @@ app.add_middleware(
 # DATABASE
 # ============================================================
 
-def get_db():
-
-    db = sqlite3.connect(
-        DATABASE_PATH
-    )
-
-    db.row_factory = sqlite3.Row
-
-    return db
+def db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
-def init_database():
+def init_db():
+    conn = db()
+    cur = conn.cursor()
 
-    db = get_db()
-
-    cursor = db.cursor()
-
-    cursor.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS documents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            filename TEXT NOT NULL,
+            name TEXT NOT NULL,
+            path TEXT,
             file_type TEXT,
-            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            content TEXT,
+            created_at TEXT
         )
     """)
 
-    cursor.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS sections (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            document_id INTEGER NOT NULL,
-            page_number INTEGER,
-            section_title TEXT,
-            content TEXT NOT NULL,
-
-            FOREIGN KEY(document_id)
-            REFERENCES documents(id)
+            document_id INTEGER,
+            section_no INTEGER,
+            title TEXT,
+            content TEXT,
+            FOREIGN KEY(document_id) REFERENCES documents(id)
         )
     """)
 
-    cursor.execute("""
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            description TEXT,
+            category TEXT,
+            priority TEXT,
+            confidence REAL,
+            status TEXT,
+            ai_summary TEXT,
+            root_cause TEXT,
+            recommendation TEXT,
+            created_at TEXT
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            case_id INTEGER,
+            source_type TEXT,
+            source_id INTEGER,
+            title TEXT,
+            content TEXT,
+            relevance REAL,
+            FOREIGN KEY(case_id) REFERENCES cases(id)
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS patterns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            description TEXT,
+            confidence REAL,
+            severity TEXT,
+            case_count INTEGER,
+            status TEXT,
+            created_at TEXT
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS simulations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            scenario TEXT,
+            option_name TEXT,
+            risk REAL,
+            impact REAL,
+            confidence REAL,
+            affected_areas TEXT,
+            consequences TEXT,
+            recommendation TEXT,
+            created_at TEXT
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            action TEXT,
+            recommendation TEXT,
+            risk REAL,
+            status TEXT,
+            approved_by TEXT,
+            created_at TEXT,
+            decided_at TEXT
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor TEXT,
+            role TEXT,
+            action TEXT,
+            target_type TEXT,
+            target_id INTEGER,
+            details TEXT,
+            created_at TEXT
+        )
+    """)
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS outcomes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            decision_id INTEGER,
+            metric TEXT,
+            before_value REAL,
+            after_value REAL,
+            unit TEXT,
+            result TEXT,
+            recorded_at TEXT
+        )
+    """)
+
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS changes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            old_value TEXT NOT NULL,
-            new_value TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            title TEXT,
+            old_value TEXT,
+            new_value TEXT,
+            created_at TEXT
         )
     """)
 
-    cursor.execute("""
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS impacts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            change_id INTEGER NOT NULL,
-            document_id INTEGER NOT NULL,
-            section_id INTEGER NOT NULL,
-
-            affected INTEGER NOT NULL,
-            confidence REAL NOT NULL,
-
+            change_id INTEGER,
+            document_id INTEGER,
+            section_id INTEGER,
+            affected INTEGER,
+            confidence REAL,
             reason TEXT,
             suggested_fix TEXT,
-
-            status TEXT DEFAULT 'pending',
-
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-            FOREIGN KEY(change_id)
-            REFERENCES changes(id),
-
-            FOREIGN KEY(document_id)
-            REFERENCES documents(id),
-
-            FOREIGN KEY(section_id)
-            REFERENCES sections(id)
+            matched_text TEXT,
+            status TEXT DEFAULT 'pending'
         )
     """)
 
-    db.commit()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER,
+            version INTEGER,
+            change_summary TEXT,
+            created_at TEXT
+        )
+    """)
 
-    db.close()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS conflicts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER,
+            section_a INTEGER,
+            section_b INTEGER,
+            topic TEXT,
+            value_a TEXT,
+            value_b TEXT,
+            severity TEXT,
+            explanation TEXT
+        )
+    """)
+
+    conn.commit()
+    conn.close()
 
 
-init_database()
+init_db()
 
 
 # ============================================================
@@ -189,334 +253,217 @@ init_database()
 # ============================================================
 
 class ChangeRequest(BaseModel):
-
     title: str
     old_value: str
     new_value: str
 
 
-class ImpactDecision(BaseModel):
-
+class ImpactUpdate(BaseModel):
     status: str
 
 
+class CaseRequest(BaseModel):
+    title: str
+    description: str
+    category: Optional[str] = "Operational"
+
+
+class SimulationRequest(BaseModel):
+    title: str
+    scenario: str
+
+
+class DecisionRequest(BaseModel):
+    title: str
+    action: str
+    recommendation: str = ""
+    risk: float = 0
+
+
+class ApprovalRequest(BaseModel):
+    decision_id: int
+    manager: str
+    pin: str
+
+
+class OutcomeRequest(BaseModel):
+    decision_id: int
+    metric: str
+    before_value: float
+    after_value: float
+    unit: str = ""
+    result: str = ""
+
+
 # ============================================================
-# TEXT CLEANING
+# HELPERS
 # ============================================================
 
-def clean_text(
-    text: str
-):
+def now():
+    return datetime.utcnow().isoformat()
 
-    text = text.replace(
-        "\x00",
-        " "
-    )
 
-    text = re.sub(
-        r"[ \t]+",
-        " ",
-        text
-    )
-
-    text = re.sub(
-        r"\n{3,}",
-        "\n\n",
-        text
-    )
-
+def clean_text(text: str):
+    text = text.replace("\x00", " ")
+    text = re.sub(r"\s+", " ", text)
     return text.strip()
 
 
-def detect_title(
-    text: str
-):
-
-    lines = [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip()
+def split_sections(text: str):
+    paragraphs = [
+        p.strip()
+        for p in re.split(r"\n\s*\n", text)
+        if p.strip()
     ]
 
-    if not lines:
+    if not paragraphs:
+        paragraphs = [text]
 
-        return "Untitled Section"
-
-    if len(lines[0]) <= 100:
-
-        return lines[0]
-
-    return "Knowledge Section"
+    return paragraphs
 
 
-# ============================================================
-# PDF
-# ============================================================
+def extract_pdf(path: Path):
+    doc = fitz.open(path)
+    pages = []
 
-def extract_pdf(
-    file_path: Path
-):
+    for page in doc:
+        pages.append(page.get_text())
 
-    sections = []
-
-    pdf = fitz.open(
-        file_path
-    )
-
-    for index, page in enumerate(pdf):
-
-        text = clean_text(
-            page.get_text()
-        )
-
-        if not text:
-
-            continue
-
-        sections.append({
-            "page_number": index + 1,
-            "section_title": detect_title(
-                text
-            ),
-            "content": text
-        })
-
-    pdf.close()
-
-    return sections
+    doc.close()
+    return "\n\n".join(pages)
 
 
-# ============================================================
-# DOCX
-# ============================================================
-
-def extract_docx(
-    file_path: Path
-):
-
-    document = DocxDocument(
-        file_path
-    )
-
-    sections = []
-
-    current_title = "Document Section"
-
-    current_content = []
-
-    for paragraph in document.paragraphs:
-
-        text = paragraph.text.strip()
-
-        if not text:
-
-            continue
-
-        style_name = ""
-
-        if paragraph.style:
-
-            style_name = (
-                paragraph.style.name or ""
-            )
-
-        if "Heading" in style_name:
-
-            if current_content:
-
-                sections.append({
-                    "page_number": None,
-                    "section_title": current_title,
-                    "content": "\n".join(
-                        current_content
-                    )
-                })
-
-            current_title = text
-
-            current_content = []
-
-        else:
-
-            current_content.append(
-                text
-            )
-
-    if current_content:
-
-        sections.append({
-            "page_number": None,
-            "section_title": current_title,
-            "content": "\n".join(
-                current_content
-            )
-        })
-
-    return sections
-
-
-# ============================================================
-# TXT / MD
-# ============================================================
-
-def extract_text_file(
-    file_path: Path
-):
-
-    text = file_path.read_text(
-        encoding="utf-8",
-        errors="ignore"
-    )
-
-    text = clean_text(
-        text
-    )
-
-    if not text:
-
-        return []
+def extract_docx(path: Path):
+    doc = DocxDocument(path)
 
     paragraphs = [
-        item.strip()
-        for item in text.split("\n\n")
-        if item.strip()
+        p.text.strip()
+        for p in doc.paragraphs
+        if p.text.strip()
     ]
 
-    sections = []
-
-    for index, paragraph in enumerate(
-        paragraphs
-    ):
-
-        sections.append({
-            "page_number": index + 1,
-            "section_title": detect_title(
-                paragraph
-            ),
-            "content": paragraph
-        })
-
-    return sections
+    return "\n\n".join(paragraphs)
 
 
-# ============================================================
-# DOCUMENT EXTRACTION
-# ============================================================
+def extract_text(path: Path):
+    ext = path.suffix.lower()
 
-def extract_document(
-    file_path: Path
-):
+    if ext == ".pdf":
+        return extract_pdf(path)
 
-    extension = file_path.suffix.lower()
+    if ext == ".docx":
+        return extract_docx(path)
 
-    if extension == ".pdf":
-
-        return extract_pdf(
-            file_path
+    if ext in [".txt", ".md"]:
+        return path.read_text(
+            encoding="utf-8",
+            errors="ignore"
         )
 
-    if extension == ".docx":
+    raise ValueError("Unsupported file type")
 
-        return extract_docx(
-            file_path
+
+def similarity_score(a: str, b: str):
+    a_words = set(
+        re.findall(
+            r"\b[a-zA-Z0-9]+\b",
+            a.lower()
         )
+    )
 
-    if extension in [
-        ".txt",
-        ".md"
-    ]:
-
-        return extract_text_file(
-            file_path
+    b_words = set(
+        re.findall(
+            r"\b[a-zA-Z0-9]+\b",
+            b.lower()
         )
+    )
 
-    raise ValueError(
-        "Unsupported file type."
+    if not a_words or not b_words:
+        return 0
+
+    return len(a_words & b_words) / max(
+        1,
+        len(a_words | b_words)
     )
 
 
+def audit(
+    actor,
+    role,
+    action,
+    target_type,
+    target_id=None,
+    details=""
+):
+    conn = db()
+
+    conn.execute("""
+        INSERT INTO audit_logs
+        (actor, role, action, target_type, target_id, details, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        actor,
+        role,
+        action,
+        target_type,
+        target_id,
+        details,
+        now()
+    ))
+
+    conn.commit()
+    conn.close()
+
+
+def safe_json(text):
+    try:
+        return json.loads(text)
+    except Exception:
+        match = re.search(
+            r"\{.*\}",
+            text,
+            re.S
+        )
+
+        if match:
+            try:
+                return json.loads(
+                    match.group()
+                )
+            except Exception:
+                pass
+
+    return {}
+
+
+def sqlite_safe(value, default=""):
+    """
+    Convert Gemini list/dict values into JSON strings
+    so SQLite can store them safely.
+    """
+
+    if value is None:
+        return default
+
+    if isinstance(value, (list, dict)):
+        return json.dumps(
+            value,
+            ensure_ascii=False
+        )
+
+    return str(value)
+
+
 # ============================================================
-# GEMINI ANALYSIS
+# GEMINI
 # ============================================================
 
-def ai_analyze_change(
-    title: str,
-    old_value: str,
-    new_value: str,
-    section_title: str,
-    content: str
-):
+def ask_ai(prompt: str):
 
     if not gemini_client:
-
-        return None
-
-    prompt = f"""
-You are RIPPLE.
-
-RIPPLE is an AI Knowledge Impact and
-Change Intelligence system.
-
-A rule or policy has changed.
-
-Your task is to determine whether a
-specific knowledge section is affected
-by that change.
-
-CHANGE TITLE:
-{title}
-
-OLD VALUE:
-{old_value}
-
-NEW VALUE:
-{new_value}
-
-SECTION TITLE:
-{section_title}
-
-SECTION CONTENT:
-{content}
-
-Analyze the semantic dependency.
-
-IMPORTANT:
-
-- Do not rely only on exact keyword matching.
-- Understand the meaning of the section.
-- The section may be affected even when
-  the exact old value is not present.
-- Consider dates, deadlines, rules,
-  procedures, requirements and dependencies.
-- Do not mark unrelated sections as affected.
-- If affected, explain exactly why.
-- If affected, generate a corrected version.
-- Preserve the original writing style.
-- Do not invent unrelated information.
-
-Return ONLY valid JSON:
-
-{{
-    "affected": true,
-    "confidence": 0.95,
-    "reason": "Explain exactly why this section is affected.",
-    "suggested_fix": "Corrected version of the section."
-}}
-
-OR:
-
-{{
-    "affected": false,
-    "confidence": 0.05,
-    "reason": "Explain why this section is not affected.",
-    "suggested_fix": ""
-}}
-
-Confidence must be between 0 and 1.
-"""
+        return {}
 
     try:
-
         response = gemini_client.models.generate_content(
             model=GEMINI_MODEL,
             contents=prompt,
@@ -526,197 +473,377 @@ Confidence must be between 0 and 1.
             )
         )
 
-        if not response.text:
+        return safe_json(response.text)
 
-            return None
-
-        result = json.loads(
-            response.text
-        )
-
-        confidence = float(
-            result.get(
-                "confidence",
-                0
-            )
-        )
-
-        confidence = max(
-            0,
-            min(
-                1,
-                confidence
-            )
-        )
-
-        return {
-            "affected": bool(
-                result.get(
-                    "affected",
-                    False
-                )
-            ),
-            "confidence": confidence,
-            "reason": str(
-                result.get(
-                    "reason",
-                    ""
-                )
-            ),
-            "suggested_fix": str(
-                result.get(
-                    "suggested_fix",
-                    ""
-                )
-            )
-        }
-
-    except Exception as error:
-
-        print(
-            "Gemini analysis error:",
-            error
-        )
-
-        return None
+    except Exception:
+        return {}
 
 
 # ============================================================
-# LOCAL FALLBACK
+# AI INVESTIGATION
 # ============================================================
 
-def local_analyze_change(
-    old_value: str,
-    new_value: str,
-    content: str
+def investigate_case(
+    title,
+    description,
+    documents
 ):
 
-    content_lower = content.lower()
-
-    old_lower = old_value.lower()
-
-    if old_lower in content_lower:
-
-        return {
-            "affected": True,
-            "confidence": 0.88,
-            "reason": (
-                f'This section explicitly references '
-                f'"{old_value}", which has changed.'
-            ),
-            "suggested_fix": content.replace(
-                old_value,
-                new_value
-            )
-        }
-
-    old_words = set(
-        re.findall(
-            r"\b\w+\b",
-            old_lower
-        )
+    context = "\n\n".join(
+        f"DOCUMENT: {d['name']}\n"
+        f"{d['content'][:5000]}"
+        for d in documents
     )
 
-    content_words = set(
-        re.findall(
-            r"\b\w+\b",
-            content_lower
-        )
-    )
+    prompt = f"""
+You are RIPPLE, an AI investigation and decision
+intelligence engine.
 
-    if not old_words:
+Investigate the following operational problem.
 
-        return {
-            "affected": False,
-            "confidence": 0.1,
-            "reason": "No meaningful old value.",
-            "suggested_fix": ""
-        }
+TITLE:
+{title}
 
-    overlap = len(
-        old_words.intersection(
-            content_words
-        )
-    )
+DESCRIPTION:
+{description}
 
-    score = overlap / len(
-        old_words
-    )
+AVAILABLE ORGANIZATIONAL KNOWLEDGE:
+{context}
 
-    if score >= 0.5:
+Return JSON with:
 
-        return {
-            "affected": True,
-            "confidence": 0.65,
-            "reason": (
-                "Several terms related to the "
-                "changed value appear in this section."
-            ),
-            "suggested_fix": content
-        }
+summary
+priority
+confidence
+possible_root_causes
+evidence
+patterns
+affected_areas
+recommended_action
+risk_score
+reasoning
+
+Rules:
+- Do not claim causality without evidence.
+- Root causes are hypotheses.
+- Clearly distinguish evidence from inference.
+- Give confidence between 0 and 100.
+- Risk score between 0 and 100.
+- Identify indirect relationships.
+"""
+
+    result = ask_ai(prompt)
+
+    if result:
+        return result
+
+    priority = "High"
+
+    if any(
+        word in description.lower()
+        for word in [
+            "critical",
+            "security",
+            "danger",
+            "outage"
+        ]
+    ):
+        priority = "Immediate"
 
     return {
-        "affected": False,
-        "confidence": 0.1,
-        "reason": (
-            "No strong dependency on the changed "
-            "value was detected."
-        ),
-        "suggested_fix": ""
+        "summary": description[:300],
+        "priority": priority,
+        "confidence": 72,
+        "possible_root_causes": [
+            {
+                "hypothesis":
+                    "Possible process or knowledge gap",
+                "confidence": 60,
+                "evidence":
+                    "Requires further investigation"
+            }
+        ],
+        "evidence": [],
+        "patterns": [],
+        "affected_areas": [
+            "Operations",
+            "Relevant procedures"
+        ],
+        "recommended_action":
+            "Review the affected process and verify "
+            "the available evidence.",
+        "risk_score": 45,
+        "reasoning":
+            "Initial analysis generated using "
+            "available case information."
     }
 
 
 # ============================================================
-# ROOT
+# AI WHAT-IF SIMULATION
+# ============================================================
+
+def simulate_scenario(
+    title,
+    scenario,
+    documents
+):
+
+    context = "\n\n".join(
+        f"{d['name']}: {d['content'][:4000]}"
+        for d in documents
+    )
+
+    prompt = f"""
+You are RIPPLE's Impact Simulation Engine.
+
+Problem:
+{title}
+
+Proposed scenario:
+{scenario}
+
+Organizational knowledge:
+{context}
+
+Simulate three possible options.
+
+Return JSON:
+
+{{
+  "options": [
+    {{
+      "name": "...",
+      "risk": 0,
+      "impact": 0,
+      "confidence": 0,
+      "affected_areas": [],
+      "consequences": [],
+      "required_actions": [],
+      "reason": "..."
+    }}
+  ],
+  "recommended_option": "...",
+  "recommendation_reason": "...",
+  "overall_risk": 0
+}}
+
+Risk and impact must be 0-100.
+
+Do not pretend simulation is certainty.
+Use estimated outcomes.
+"""
+
+    result = ask_ai(prompt)
+
+    if result:
+        return result
+
+    return {
+        "options": [
+            {
+                "name":
+                    "Option A — Immediate change",
+                "risk": 35,
+                "impact": 78,
+                "confidence": 64,
+                "affected_areas": [
+                    "Operations"
+                ],
+                "consequences": [
+                    "Fast improvement",
+                    "Requires process adjustment"
+                ],
+                "required_actions": [
+                    "Review procedure",
+                    "Notify affected staff"
+                ],
+                "reason":
+                    "Fastest intervention."
+            },
+            {
+                "name":
+                    "Option B — Controlled rollout",
+                "risk": 22,
+                "impact": 70,
+                "confidence": 72,
+                "affected_areas": [
+                    "Operations",
+                    "Support"
+                ],
+                "consequences": [
+                    "Lower transition risk",
+                    "Slower implementation"
+                ],
+                "required_actions": [
+                    "Pilot change",
+                    "Measure results"
+                ],
+                "reason":
+                    "Balances impact and risk."
+            },
+            {
+                "name":
+                    "Option C — No immediate change",
+                "risk": 68,
+                "impact": 25,
+                "confidence": 61,
+                "affected_areas": [],
+                "consequences": [
+                    "Problem may continue",
+                    "Existing process remains"
+                ],
+                "required_actions": [
+                    "Continue monitoring"
+                ],
+                "reason":
+                    "Avoids immediate disruption."
+            }
+        ],
+        "recommended_option":
+            "Option B — Controlled rollout",
+        "recommendation_reason":
+            "It provides a strong expected impact "
+            "while reducing transition risk.",
+        "overall_risk": 32
+    }
+
+
+# ============================================================
+# AI PATTERN DETECTION
+# ============================================================
+
+def detect_patterns(cases):
+
+    if not cases:
+        return []
+
+    data = "\n".join(
+        f"{c['title']} | "
+        f"{c['category']} | "
+        f"{c['description']}"
+        for c in cases
+    )
+
+    prompt = f"""
+You are RIPPLE's Pattern Detection Engine.
+
+Analyze these operational cases:
+
+{data}
+
+Return JSON:
+
+{{
+  "patterns": [
+    {{
+      "title": "...",
+      "description": "...",
+      "confidence": 0,
+      "severity": "Low|Medium|High|Critical",
+      "case_count": 0,
+      "possible_common_factor": "...",
+      "evidence": []
+    }}
+  ]
+}}
+
+Do not claim causality.
+Describe possible correlations or recurring signals.
+"""
+
+    result = ask_ai(prompt)
+
+    if result and "patterns" in result:
+        return result["patterns"]
+
+    return []
+
+
+# ============================================================
+# HEALTH SCORE
+# ============================================================
+
+def calculate_health():
+
+    conn = db()
+
+    documents = conn.execute(
+        "SELECT COUNT(*) AS c FROM documents"
+    ).fetchone()["c"]
+
+    cases = conn.execute(
+        "SELECT COUNT(*) AS c FROM cases"
+    ).fetchone()["c"]
+
+    pending = conn.execute("""
+        SELECT COUNT(*) AS c
+        FROM decisions
+        WHERE status='pending'
+    """).fetchone()["c"]
+
+    audit_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM audit_logs"
+    ).fetchone()["c"]
+
+    conflicts = conn.execute(
+        "SELECT COUNT(*) AS c FROM conflicts"
+    ).fetchone()["c"]
+
+    conn.close()
+
+    score = 100
+
+    score -= min(
+        conflicts * 4,
+        20
+    )
+
+    score -= min(
+        pending * 3,
+        15
+    )
+
+    if documents == 0:
+        score -= 10
+
+    return max(
+        0,
+        min(100, score)
+    )
+
+
+# ============================================================
+# BASIC
 # ============================================================
 
 @app.get("/")
 def root():
-
     return {
         "name": "RIPPLE",
-        "message": (
-            "AI Knowledge Impact "
-            "& Change Intelligence Platform"
-        ),
-        "gemini": bool(
-            gemini_client
-        ),
-        "model": GEMINI_MODEL
+        "description":
+            "AI Investigation & Decision Intelligence",
+        "status": "online"
     }
 
-
-# ============================================================
-# HEALTH
-# ============================================================
 
 @app.get("/health")
 def health():
-
     return {
         "status": "healthy",
-        "gemini": bool(
-            gemini_client
-        ),
-        "model": GEMINI_MODEL
+        "system_score": calculate_health(),
+        "ai": bool(gemini_client)
     }
 
 
 # ============================================================
-# UPLOAD
+# DOCUMENTS
 # ============================================================
 
 @app.post("/upload")
-async def upload_file(
+async def upload_document(
     file: UploadFile = File(...)
 ):
-
-    if not file.filename:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Filename is required."
-        )
 
     allowed = [
         ".pdf",
@@ -725,135 +852,108 @@ async def upload_file(
         ".md"
     ]
 
-    extension = Path(
+    ext = Path(
         file.filename
     ).suffix.lower()
 
-    if extension not in allowed:
-
+    if ext not in allowed:
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Use PDF, DOCX, TXT or MD."
-            )
+            detail=
+                "Supported files: PDF, DOCX, TXT, MD"
         )
 
-    filename = Path(
+    safe_name = re.sub(
+        r"[^a-zA-Z0-9._-]",
+        "_",
         file.filename
-    ).name
-
-    file_path = (
-        UPLOAD_DIR /
-        filename
     )
 
-    with file_path.open(
-        "wb"
-    ) as buffer:
+    path = UPLOAD_DIR / safe_name
 
-        shutil.copyfileobj(
-            file.file,
-            buffer
+    with open(path, "wb") as buffer:
+        buffer.write(
+            await file.read()
         )
 
     try:
-
-        sections = extract_document(
-            file_path
+        content = clean_text(
+            extract_text(path)
         )
-
-    except Exception as error:
-
-        file_path.unlink(
-            missing_ok=True
-        )
-
+    except Exception as e:
         raise HTTPException(
             status_code=400,
-            detail=str(error)
+            detail=str(e)
         )
 
-    db = get_db()
+    conn = db()
 
-    cursor = db.cursor()
-
-    cursor.execute(
-        """
+    cur = conn.execute("""
         INSERT INTO documents
-        (filename, file_type)
-        VALUES (?, ?)
-        """,
-        (
-            filename,
-            file.content_type
-        )
+        (name, path, file_type, content, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (
+        file.filename,
+        str(path),
+        ext,
+        content,
+        now()
+    ))
+
+    document_id = cur.lastrowid
+
+    sections = split_sections(content)
+
+    for index, section in enumerate(
+        sections,
+        1
+    ):
+
+        title = section.split(".")[0][:100]
+
+        conn.execute("""
+            INSERT INTO sections
+            (document_id, section_no, title, content)
+            VALUES (?, ?, ?, ?)
+        """, (
+            document_id,
+            index,
+            title,
+            section
+        ))
+
+    conn.commit()
+    conn.close()
+
+    audit(
+        "system",
+        "system",
+        "UPLOAD_DOCUMENT",
+        "document",
+        document_id,
+        file.filename
     )
 
-    document_id = cursor.lastrowid
-
-    for section in sections:
-
-        cursor.execute(
-            """
-            INSERT INTO sections
-            (
-                document_id,
-                page_number,
-                section_title,
-                content
-            )
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                document_id,
-                section["page_number"],
-                section["section_title"],
-                section["content"]
-            )
-        )
-
-    db.commit()
-
-    db.close()
-
     return {
-        "message": (
-            "Document uploaded and indexed."
-        ),
+        "success": True,
         "document_id": document_id,
-        "filename": filename,
-        "sections": len(
-            sections
-        )
+        "name": file.filename,
+        "sections": len(sections)
     }
 
-
-# ============================================================
-# DOCUMENTS
-# ============================================================
 
 @app.get("/documents")
 def get_documents():
 
-    db = get_db()
+    conn = db()
 
-    rows = db.execute(
-        """
-        SELECT
-            d.id,
-            d.filename,
-            d.file_type,
-            d.uploaded_at,
-            COUNT(s.id) AS section_count
-        FROM documents d
-        LEFT JOIN sections s
-            ON d.id = s.document_id
-        GROUP BY d.id
-        ORDER BY d.id DESC
-        """
-    ).fetchall()
+    rows = conn.execute("""
+        SELECT id, name, file_type, created_at
+        FROM documents
+        ORDER BY id DESC
+    """).fetchall()
 
-    db.close()
+    conn.close()
 
     return [
         dict(row)
@@ -861,64 +961,50 @@ def get_documents():
     ]
 
 
-# ============================================================
-# DOCUMENT
-# ============================================================
-
 @app.get("/documents/{document_id}")
 def get_document(
     document_id: int
 ):
 
-    db = get_db()
+    conn = db()
 
-    document = db.execute(
-        """
+    document = conn.execute("""
         SELECT *
         FROM documents
-        WHERE id = ?
-        """,
-        (
-            document_id,
-        )
-    ).fetchone()
+        WHERE id=?
+    """, (
+        document_id,
+    )).fetchone()
 
     if not document:
-
-        db.close()
-
+        conn.close()
         raise HTTPException(
             status_code=404,
-            detail="Document not found."
+            detail="Document not found"
         )
 
-    sections = db.execute(
-        """
+    sections = conn.execute("""
         SELECT *
         FROM sections
-        WHERE document_id = ?
-        ORDER BY id
-        """,
-        (
-            document_id,
-        )
-    ).fetchall()
+        WHERE document_id=?
+        ORDER BY section_no
+    """, (
+        document_id,
+    )).fetchall()
 
-    db.close()
+    conn.close()
 
     return {
-        "document": dict(
-            document
-        ),
+        "document": dict(document),
         "sections": [
-            dict(section)
-            for section in sections
+            dict(s)
+            for s in sections
         ]
     }
 
 
 # ============================================================
-# ANALYZE CHANGE
+# IMPACT ANALYSIS
 # ============================================================
 
 @app.post("/analyze-change")
@@ -926,223 +1012,709 @@ def analyze_change(
     request: ChangeRequest
 ):
 
-    if not request.old_value.strip():
+    conn = db()
 
-        raise HTTPException(
-            status_code=400,
-            detail="Old value is required."
-        )
-
-    if not request.new_value.strip():
-
-        raise HTTPException(
-            status_code=400,
-            detail="New value is required."
-        )
-
-    db = get_db()
-
-    cursor = db.cursor()
-
-    cursor.execute(
-        """
+    cur = conn.execute("""
         INSERT INTO changes
-        (
-            title,
-            old_value,
-            new_value
-        )
-        VALUES (?, ?, ?)
-        """,
-        (
-            request.title,
-            request.old_value,
-            request.new_value
-        )
-    )
+        (title, old_value, new_value, created_at)
+        VALUES (?, ?, ?, ?)
+    """, (
+        request.title,
+        request.old_value,
+        request.new_value,
+        now()
+    ))
 
-    change_id = cursor.lastrowid
+    change_id = cur.lastrowid
 
-    sections = cursor.execute(
-        """
-        SELECT
-            s.*,
-            d.filename
-        FROM sections s
-        JOIN documents d
-            ON s.document_id = d.id
-        ORDER BY s.id
-        """
-    ).fetchall()
+    documents = conn.execute("""
+        SELECT *
+        FROM documents
+    """).fetchall()
 
     results = []
 
-    for section in sections:
+    for document in documents:
 
-        ai_result = ai_analyze_change(
-            title=request.title,
-            old_value=request.old_value,
-            new_value=request.new_value,
-            section_title=section[
-                "section_title"
-            ],
-            content=section[
-                "content"
-            ]
-        )
+        sections = conn.execute("""
+            SELECT *
+            FROM sections
+            WHERE document_id=?
+        """, (
+            document["id"],
+        )).fetchall()
 
-        if ai_result:
+        for section in sections:
 
-            result = ai_result
+            text = section["content"]
 
-        else:
-
-            result = local_analyze_change(
-                old_value=request.old_value,
-                new_value=request.new_value,
-                content=section[
-                    "content"
-                ]
+            exact = (
+                request.old_value.lower()
+                in text.lower()
             )
 
-        cursor.execute(
-            """
-            INSERT INTO impacts
-            (
+            semantic = (
+                similarity_score(
+                    request.old_value,
+                    text
+                ) > 0.05
+            )
+
+            if not exact and not semantic:
+                continue
+
+            confidence = (
+                95
+                if exact
+                else 62
+            )
+
+            reason = (
+                f"The section directly contains "
+                f"the value '{request.old_value}'."
+                if exact
+                else
+                "The section appears semantically "
+                "related to the changed value."
+            )
+
+            suggested = text
+
+            if exact:
+                suggested = re.sub(
+                    re.escape(
+                        request.old_value
+                    ),
+                    request.new_value,
+                    text,
+                    flags=re.I
+                )
+
+            ai = ask_ai(f"""
+Analyze this knowledge section for a change.
+
+Old value: {request.old_value}
+New value: {request.new_value}
+
+Section:
+{text}
+
+Return JSON:
+{{
+ "affected": true,
+ "confidence": 0,
+ "reason": "...",
+ "suggested_fix": "...",
+ "relationship":
+     "DIRECT|INDIRECT|SEMANTIC|CONFLICT"
+}}
+""")
+
+            if ai:
+                confidence = ai.get(
+                    "confidence",
+                    confidence
+                )
+
+                reason = ai.get(
+                    "reason",
+                    reason
+                )
+
+                suggested = ai.get(
+                    "suggested_fix",
+                    suggested
+                )
+
+            cur2 = conn.execute("""
+                INSERT INTO impacts
+                (
+                    change_id,
+                    document_id,
+                    section_id,
+                    affected,
+                    confidence,
+                    reason,
+                    suggested_fix,
+                    matched_text,
+                    status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            """, (
                 change_id,
-                document_id,
-                section_id,
-                affected,
+                document["id"],
+                section["id"],
+                1,
                 confidence,
                 reason,
-                suggested_fix
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                change_id,
-                section["document_id"],
-                section["id"],
-                int(
-                    result["affected"]
-                ),
-                result["confidence"],
-                result["reason"],
-                result["suggested_fix"]
-            )
-        )
+                suggested,
+                request.old_value
+            ))
 
-        impact_id = cursor.lastrowid
+            results.append({
+                "id": cur2.lastrowid,
+                "document_id":
+                    document["id"],
+                "document_name":
+                    document["name"],
+                "section_id":
+                    section["id"],
+                "section_no":
+                    section["section_no"],
+                "affected": True,
+                "confidence": confidence,
+                "reason": reason,
+                "suggested_fix": suggested,
+                "matched_text":
+                    request.old_value,
+                "relationship":
+                    ai.get(
+                        "relationship",
+                        "DIRECT"
+                    )
+                    if ai
+                    else (
+                        "DIRECT"
+                        if exact
+                        else "SEMANTIC"
+                    )
+            })
 
-        results.append({
-            "id": impact_id,
+    conn.commit()
+    conn.close()
 
-            "document_id":
-                section["document_id"],
-
-            "document_name":
-                section["filename"],
-
-            "section_id":
-                section["id"],
-
-            "section_title":
-                section["section_title"],
-
-            "page_number":
-                section["page_number"],
-
-            "content":
-                section["content"],
-
-            "affected":
-                result["affected"],
-
-            "confidence":
-                result["confidence"],
-
-            "reason":
-                result["reason"],
-
-            "suggested_fix":
-                result["suggested_fix"],
-
-            "status":
-                "pending"
-        })
-
-    db.commit()
-
-    db.close()
-
-    affected_count = sum(
-        1
-        for result in results
-        if result["affected"]
+    audit(
+        "system",
+        "system",
+        "ANALYZE_CHANGE",
+        "change",
+        change_id,
+        request.title
     )
 
     return {
         "change_id": change_id,
         "title": request.title,
-        "old_value": request.old_value,
-        "new_value": request.new_value,
-
-        "ai_engine": (
-            "Gemini"
-            if gemini_client
-            else "Local fallback"
-        ),
-
-        "total_sections":
+        "old_value":
+            request.old_value,
+        "new_value":
+            request.new_value,
+        "impact_count":
             len(results),
-
-        "affected_sections":
-            affected_count,
-
-        "results":
-            results
+        "blast_radius":
+            len(results),
+        "results": results
     }
 
-
-# ============================================================
-# IMPACTS
-# ============================================================
 
 @app.get("/impacts/{change_id}")
 def get_impacts(
     change_id: int
 ):
 
-    db = get_db()
+    conn = db()
 
-    rows = db.execute(
-        """
+    rows = conn.execute("""
         SELECT
-            i.*,
-            d.filename,
-            s.section_title,
-            s.page_number,
-            s.content
-        FROM impacts i
+            impacts.*,
+            documents.name AS document_name,
+            sections.section_no,
+            sections.content AS section_content
+        FROM impacts
+        JOIN documents
+            ON documents.id=impacts.document_id
+        JOIN sections
+            ON sections.id=impacts.section_id
+        WHERE impacts.change_id=?
+    """, (
+        change_id,
+    )).fetchall()
 
-        JOIN documents d
-            ON i.document_id = d.id
+    conn.close()
 
-        JOIN sections s
-            ON i.section_id = s.id
+    return [
+        dict(row)
+        for row in rows
+    ]
 
-        WHERE i.change_id = ?
 
-        ORDER BY
-            i.affected DESC,
-            i.confidence DESC
-        """,
-        (
-            change_id,
+@app.patch("/impacts/{impact_id}")
+def update_impact(
+    impact_id: int,
+    request: ImpactUpdate
+):
+
+    conn = db()
+
+    impact = conn.execute("""
+        SELECT *
+        FROM impacts
+        WHERE id=?
+    """, (
+        impact_id,
+    )).fetchone()
+
+    if not impact:
+        conn.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Impact not found"
         )
-    ).fetchall()
 
-    db.close()
+    conn.execute("""
+        UPDATE impacts
+        SET status=?
+        WHERE id=?
+    """, (
+        request.status,
+        impact_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    audit(
+        "manager",
+        "manager",
+        "UPDATE_IMPACT",
+        "impact",
+        impact_id,
+        request.status
+    )
+
+    return {
+        "success": True,
+        "status": request.status
+    }
+
+
+# ============================================================
+# INVESTIGATION / CASES
+# ============================================================
+
+@app.post("/cases")
+def create_case(
+    request: CaseRequest
+):
+
+    conn = db()
+
+    documents = conn.execute("""
+        SELECT *
+        FROM documents
+    """).fetchall()
+
+    docs = [
+        dict(d)
+        for d in documents
+    ]
+
+    analysis = investigate_case(
+        request.title,
+        request.description,
+        docs
+    )
+
+    # --------------------------------------------------------
+    # SQLITE-SAFE AI VALUES
+    # Gemini can return lists/dicts instead of strings.
+    # SQLite cannot directly store Python lists/dicts.
+    # --------------------------------------------------------
+
+    priority = sqlite_safe(
+        analysis.get(
+            "priority",
+            "Review"
+        ),
+        "Review"
+    )
+
+    confidence = analysis.get(
+        "confidence",
+        70
+    )
+
+    if isinstance(
+        confidence,
+        (list, dict)
+    ):
+        confidence = 70
+
+    try:
+        confidence = float(
+            confidence
+        )
+    except (
+        TypeError,
+        ValueError
+    ):
+        confidence = 70
+
+    summary = sqlite_safe(
+        analysis.get(
+            "summary",
+            ""
+        ),
+        ""
+    )
+
+    root_causes = sqlite_safe(
+        analysis.get(
+            "possible_root_causes",
+            []
+        ),
+        "[]"
+    )
+
+    recommendation = sqlite_safe(
+        analysis.get(
+            "recommended_action",
+            ""
+        ),
+        ""
+    )
+
+    cur = conn.execute("""
+        INSERT INTO cases
+        (
+            title,
+            description,
+            category,
+            priority,
+            confidence,
+            status,
+            ai_summary,
+            root_cause,
+            recommendation,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        request.title,
+        request.description,
+        request.category,
+        priority,
+        confidence,
+        "open",
+        summary,
+        root_causes,
+        recommendation,
+        now()
+    ))
+
+    case_id = cur.lastrowid
+
+    # --------------------------------------------------------
+    # SAVE AI EVIDENCE
+    # --------------------------------------------------------
+
+    evidence_items = analysis.get(
+        "evidence",
+        []
+    )
+
+    if not isinstance(
+        evidence_items,
+        list
+    ):
+        evidence_items = [
+            evidence_items
+        ]
+
+    for evidence in evidence_items:
+
+        if not isinstance(
+            evidence,
+            dict
+        ):
+            evidence = {
+                "content": evidence
+            }
+
+        source_type = sqlite_safe(
+            evidence.get(
+                "source_type",
+                "AI"
+            ),
+            "AI"
+        )
+
+        source_id = evidence.get(
+            "source_id"
+        )
+
+        if isinstance(
+            source_id,
+            (list, dict)
+        ):
+            source_id = json.dumps(
+                source_id,
+                ensure_ascii=False
+            )
+
+        evidence_title = sqlite_safe(
+            evidence.get(
+                "title",
+                "AI evidence"
+            ),
+            "AI evidence"
+        )
+
+        evidence_content = sqlite_safe(
+            evidence.get(
+                "content",
+                ""
+            ),
+            ""
+        )
+
+        relevance = evidence.get(
+            "relevance",
+            60
+        )
+
+        if isinstance(
+            relevance,
+            (list, dict)
+        ):
+            relevance = 60
+
+        try:
+            relevance = float(
+                relevance
+            )
+        except (
+            TypeError,
+            ValueError
+        ):
+            relevance = 60
+
+        conn.execute("""
+            INSERT INTO evidence
+            (
+                case_id,
+                source_type,
+                source_id,
+                title,
+                content,
+                relevance
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            case_id,
+            source_type,
+            source_id,
+            evidence_title,
+            evidence_content,
+            relevance
+        ))
+
+    conn.commit()
+    conn.close()
+
+    audit(
+        "user",
+        "user",
+        "CREATE_CASE",
+        "case",
+        case_id,
+        request.title
+    )
+
+    return {
+        "case_id": case_id,
+        "analysis": analysis
+    }
+
+
+@app.get("/cases")
+def get_cases():
+
+    conn = db()
+
+    rows = conn.execute("""
+        SELECT *
+        FROM cases
+        ORDER BY id DESC
+    """).fetchall()
+
+    conn.close()
+
+    result = []
+
+    for row in rows:
+
+        item = dict(row)
+
+        try:
+            item["root_cause"] = json.loads(
+                item["root_cause"] or "[]"
+            )
+        except Exception:
+            item["root_cause"] = []
+
+        result.append(item)
+
+    return result
+
+
+@app.get("/cases/{case_id}")
+def get_case(
+    case_id: int
+):
+
+    conn = db()
+
+    case = conn.execute("""
+        SELECT *
+        FROM cases
+        WHERE id=?
+    """, (
+        case_id,
+    )).fetchone()
+
+    evidence = conn.execute("""
+        SELECT *
+        FROM evidence
+        WHERE case_id=?
+    """, (
+        case_id,
+    )).fetchall()
+
+    conn.close()
+
+    if not case:
+        raise HTTPException(
+            status_code=404,
+            detail="Case not found"
+        )
+
+    item = dict(case)
+
+    try:
+        item["root_cause"] = json.loads(
+            item["root_cause"] or "[]"
+        )
+    except Exception:
+        item["root_cause"] = []
+
+    item["evidence"] = [
+        dict(e)
+        for e in evidence
+    ]
+
+    return item
+
+
+# ============================================================
+# PATTERN DETECTION
+# ============================================================
+
+@app.post("/patterns/detect")
+def detect_case_patterns():
+
+    conn = db()
+
+    rows = conn.execute("""
+        SELECT *
+        FROM cases
+        ORDER BY id DESC
+        LIMIT 100
+    """).fetchall()
+
+    cases = [
+        dict(r)
+        for r in rows
+    ]
+
+    patterns = detect_patterns(
+        cases
+    )
+
+    for pattern in patterns:
+
+        if not isinstance(
+            pattern,
+            dict
+        ):
+            continue
+
+        conn.execute("""
+            INSERT INTO patterns
+            (
+                title,
+                description,
+                confidence,
+                severity,
+                case_count,
+                status,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            sqlite_safe(
+                pattern.get(
+                    "title",
+                    "Emerging pattern"
+                ),
+                "Emerging pattern"
+            ),
+            sqlite_safe(
+                pattern.get(
+                    "description",
+                    ""
+                ),
+                ""
+            ),
+            pattern.get(
+                "confidence",
+                60
+            ),
+            sqlite_safe(
+                pattern.get(
+                    "severity",
+                    "Medium"
+                ),
+                "Medium"
+            ),
+            pattern.get(
+                "case_count",
+                0
+            ),
+            "active",
+            now()
+        ))
+
+    conn.commit()
+    conn.close()
+
+    audit(
+        "system",
+        "system",
+        "DETECT_PATTERNS",
+        "pattern",
+        None,
+        f"{len(patterns)} patterns detected"
+    )
+
+    return {
+        "count": len(patterns),
+        "patterns": patterns
+    }
+
+
+@app.get("/patterns")
+def get_patterns():
+
+    conn = db()
+
+    rows = conn.execute("""
+        SELECT *
+        FROM patterns
+        ORDER BY id DESC
+    """).fetchall()
+
+    conn.close()
 
     return [
         dict(row)
@@ -1151,66 +1723,718 @@ def get_impacts(
 
 
 # ============================================================
-# APPROVE / REJECT
+# IMPACT LAB
 # ============================================================
 
-@app.patch("/impacts/{impact_id}")
-def update_impact(
-    impact_id: int,
-    decision: ImpactDecision
+@app.post("/simulate")
+def simulate(
+    request: SimulationRequest
 ):
 
-    allowed = [
-        "approved",
-        "rejected",
-        "pending"
+    conn = db()
+
+    documents = conn.execute("""
+        SELECT *
+        FROM documents
+    """).fetchall()
+
+    docs = [
+        dict(d)
+        for d in documents
     ]
 
-    if decision.status not in allowed:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid status."
-        )
-
-    db = get_db()
-
-    cursor = db.cursor()
-
-    cursor.execute(
-        """
-        UPDATE impacts
-        SET status = ?
-        WHERE id = ?
-        """,
-        (
-            decision.status,
-            impact_id
-        )
+    result = simulate_scenario(
+        request.title,
+        request.scenario,
+        docs
     )
 
-    if cursor.rowcount == 0:
+    simulation_ids = []
 
-        db.close()
+    options = result.get(
+        "options",
+        []
+    )
 
-        raise HTTPException(
-            status_code=404,
-            detail="Impact not found."
+    if not isinstance(
+        options,
+        list
+    ):
+        options = []
+
+    for option in options:
+
+        if not isinstance(
+            option,
+            dict
+        ):
+            continue
+
+        affected = json.dumps(
+            option.get(
+                "affected_areas",
+                []
+            ),
+            ensure_ascii=False
         )
 
-    db.commit()
+        consequences = json.dumps(
+            option.get(
+                "consequences",
+                []
+            ),
+            ensure_ascii=False
+        )
 
-    db.close()
+        recommendation = sqlite_safe(
+            option.get(
+                "reason",
+                ""
+            ),
+            ""
+        )
+
+        cur = conn.execute("""
+            INSERT INTO simulations
+            (
+                title,
+                scenario,
+                option_name,
+                risk,
+                impact,
+                confidence,
+                affected_areas,
+                consequences,
+                recommendation,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            request.title,
+            request.scenario,
+            sqlite_safe(
+                option.get(
+                    "name",
+                    "Option"
+                ),
+                "Option"
+            ),
+            option.get(
+                "risk",
+                50
+            ),
+            option.get(
+                "impact",
+                50
+            ),
+            option.get(
+                "confidence",
+                60
+            ),
+            affected,
+            consequences,
+            recommendation,
+            now()
+        ))
+
+        simulation_ids.append(
+            cur.lastrowid
+        )
+
+    conn.commit()
+    conn.close()
+
+    audit(
+        "system",
+        "system",
+        "RUN_SIMULATION",
+        "simulation",
+        None,
+        request.title
+    )
 
     return {
+        "simulation_ids":
+            simulation_ids,
+        **result
+    }
+
+
+@app.get("/simulations")
+def get_simulations():
+
+    conn = db()
+
+    rows = conn.execute("""
+        SELECT *
+        FROM simulations
+        ORDER BY id DESC
+    """).fetchall()
+
+    conn.close()
+
+    result = []
+
+    for row in rows:
+
+        item = dict(row)
+
+        try:
+            item["affected_areas"] = json.loads(
+                item["affected_areas"] or "[]"
+            )
+        except Exception:
+            item["affected_areas"] = []
+
+        try:
+            item["consequences"] = json.loads(
+                item["consequences"] or "[]"
+            )
+        except Exception:
+            item["consequences"] = []
+
+        result.append(item)
+
+    return result
+
+
+# ============================================================
+# DECISION ROOM
+# ============================================================
+
+@app.post("/decisions")
+def create_decision(
+    request: DecisionRequest
+):
+
+    conn = db()
+
+    cur = conn.execute("""
+        INSERT INTO decisions
+        (
+            title,
+            action,
+            recommendation,
+            risk,
+            status,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, 'pending', ?)
+    """, (
+        request.title,
+        request.action,
+        request.recommendation,
+        request.risk,
+        now()
+    ))
+
+    decision_id = cur.lastrowid
+
+    conn.commit()
+    conn.close()
+
+    audit(
+        "staff",
+        "staff",
+        "CREATE_DECISION",
+        "decision",
+        decision_id,
+        request.title
+    )
+
+    return {
+        "success": True,
+        "decision_id":
+            decision_id,
+        "status": "pending"
+    }
+
+
+@app.get("/decisions")
+def get_decisions():
+
+    conn = db()
+
+    rows = conn.execute("""
+        SELECT *
+        FROM decisions
+        ORDER BY
+            CASE
+                WHEN status='pending' THEN 0
+                ELSE 1
+            END,
+            id DESC
+    """).fetchall()
+
+    conn.close()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+
+# ============================================================
+# MANAGER APPROVAL
+# ============================================================
+
+def verify_pin(
+    pin: str
+):
+
+    demo_pin_hash = hashlib.sha256(
+        b"2468"
+    ).hexdigest()
+
+    supplied_hash = hashlib.sha256(
+        pin.encode()
+    ).hexdigest()
+
+    return (
+        supplied_hash
+        == demo_pin_hash
+    )
+
+
+@app.post("/decisions/approve")
+def approve_decision(
+    request: ApprovalRequest
+):
+
+    if not verify_pin(
+        request.pin
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail=
+                "Invalid manager authorization"
+        )
+
+    conn = db()
+
+    decision = conn.execute("""
+        SELECT *
+        FROM decisions
+        WHERE id=?
+    """, (
+        request.decision_id,
+    )).fetchone()
+
+    if not decision:
+        conn.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Decision not found"
+        )
+
+    if decision["status"] != "pending":
+        conn.close()
+        raise HTTPException(
+            status_code=400,
+            detail="Decision already resolved"
+        )
+
+    conn.execute("""
+        UPDATE decisions
+        SET
+            status='approved',
+            approved_by=?,
+            decided_at=?
+        WHERE id=?
+    """, (
+        request.manager,
+        now(),
+        request.decision_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    audit(
+        request.manager,
+        "manager",
+        "APPROVE_DECISION",
+        "decision",
+        request.decision_id,
+        "Authorized execution"
+    )
+
+    return {
+        "success": True,
+        "status": "approved",
         "message":
-            "Impact status updated.",
+            "Decision approved and authorized "
+            "for execution."
+    }
 
-        "impact_id":
-            impact_id,
 
-        "status":
-            decision.status
+@app.post("/decisions/{decision_id}/reject")
+def reject_decision(
+    decision_id: int
+):
+
+    conn = db()
+
+    decision = conn.execute("""
+        SELECT *
+        FROM decisions
+        WHERE id=?
+    """, (
+        decision_id,
+    )).fetchone()
+
+    if not decision:
+        conn.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Decision not found"
+        )
+
+    conn.execute("""
+        UPDATE decisions
+        SET
+            status='rejected',
+            decided_at=?
+        WHERE id=?
+    """, (
+        now(),
+        decision_id
+    ))
+
+    conn.commit()
+    conn.close()
+
+    audit(
+        "manager",
+        "manager",
+        "REJECT_DECISION",
+        "decision",
+        decision_id,
+        "Decision rejected"
+    )
+
+    return {
+        "success": True,
+        "status": "rejected"
+    }
+
+
+# ============================================================
+# OUTCOME / CLOSED LOOP
+# ============================================================
+
+@app.post("/outcomes")
+def record_outcome(
+    request: OutcomeRequest
+):
+
+    conn = db()
+
+    decision = conn.execute("""
+        SELECT *
+        FROM decisions
+        WHERE id=?
+    """, (
+        request.decision_id,
+    )).fetchone()
+
+    if not decision:
+        conn.close()
+        raise HTTPException(
+            status_code=404,
+            detail="Decision not found"
+        )
+
+    change = (
+        request.after_value
+        - request.before_value
+    )
+
+    if change > 0:
+        outcome_label = "Improved"
+    elif change < 0:
+        outcome_label = "Declined"
+    else:
+        outcome_label = (
+            "No measurable change"
+        )
+
+    result = (
+        request.result
+        or outcome_label
+    )
+
+    cur = conn.execute("""
+        INSERT INTO outcomes
+        (
+            decision_id,
+            metric,
+            before_value,
+            after_value,
+            unit,
+            result,
+            recorded_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        request.decision_id,
+        request.metric,
+        request.before_value,
+        request.after_value,
+        request.unit,
+        result,
+        now()
+    ))
+
+    outcome_id = cur.lastrowid
+
+    conn.commit()
+    conn.close()
+
+    audit(
+        "staff",
+        "staff",
+        "RECORD_OUTCOME",
+        "outcome",
+        outcome_id,
+        f"{request.metric}: {result}"
+    )
+
+    return {
+        "success": True,
+        "outcome_id":
+            outcome_id,
+        "change": change,
+        "result": result
+    }
+
+
+@app.get("/outcomes")
+def get_outcomes():
+
+    conn = db()
+
+    rows = conn.execute("""
+        SELECT
+            outcomes.*,
+            decisions.title AS decision_title
+        FROM outcomes
+        LEFT JOIN decisions
+            ON decisions.id=outcomes.decision_id
+        ORDER BY outcomes.id DESC
+    """).fetchall()
+
+    conn.close()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+
+# ============================================================
+# AUDIT
+# ============================================================
+
+@app.get("/audit")
+def get_audit():
+
+    conn = db()
+
+    rows = conn.execute("""
+        SELECT *
+        FROM audit_logs
+        ORDER BY id DESC
+        LIMIT 200
+    """).fetchall()
+
+    conn.close()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+
+# ============================================================
+# CONFLICT DETECTION
+# ============================================================
+
+@app.get("/conflicts")
+def get_conflicts():
+
+    conn = db()
+
+    rows = conn.execute("""
+        SELECT *
+        FROM conflicts
+        ORDER BY
+            CASE severity
+                WHEN 'critical' THEN 0
+                WHEN 'high' THEN 1
+                WHEN 'medium' THEN 2
+                ELSE 3
+            END,
+            id DESC
+    """).fetchall()
+
+    conn.close()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+
+@app.post("/conflicts/detect")
+def detect_conflicts():
+
+    conn = db()
+
+    documents = conn.execute("""
+        SELECT *
+        FROM documents
+    """).fetchall()
+
+    detected = []
+
+    for document in documents:
+
+        sections = conn.execute("""
+            SELECT *
+            FROM sections
+            WHERE document_id=?
+            ORDER BY section_no
+        """, (
+            document["id"],
+        )).fetchall()
+
+        for i in range(
+            len(sections)
+        ):
+
+            for j in range(
+                i + 1,
+                len(sections)
+            ):
+
+                a = sections[i]["content"]
+                b = sections[j]["content"]
+
+                common_words = (
+                    set(
+                        re.findall(
+                            r"\b[a-zA-Z]+\b",
+                            a.lower()
+                        )
+                    )
+                    &
+                    set(
+                        re.findall(
+                            r"\b[a-zA-Z]+\b",
+                            b.lower()
+                        )
+                    )
+                )
+
+                policy_words = {
+                    "must",
+                    "shall",
+                    "deadline",
+                    "required",
+                    "limit",
+                    "maximum",
+                    "minimum",
+                    "allowed",
+                    "prohibited",
+                    "policy"
+                }
+
+                if len(
+                    common_words
+                    & policy_words
+                ) >= 1:
+
+                    values_a = re.findall(
+                        r"\b\d+(?:\.\d+)?\b|"
+                        r"\b(?:monday|tuesday|"
+                        r"wednesday|thursday|"
+                        r"friday|saturday|"
+                        r"sunday)\b",
+                        a,
+                        re.I
+                    )
+
+                    values_b = re.findall(
+                        r"\b\d+(?:\.\d+)?\b|"
+                        r"\b(?:monday|tuesday|"
+                        r"wednesday|thursday|"
+                        r"friday|saturday|"
+                        r"sunday)\b",
+                        b,
+                        re.I
+                    )
+
+                    if (
+                        values_a
+                        and values_b
+                        and values_a != values_b
+                    ):
+
+                        conn.execute("""
+                            INSERT INTO conflicts
+                            (
+                                document_id,
+                                section_a,
+                                section_b,
+                                topic,
+                                value_a,
+                                value_b,
+                                severity,
+                                explanation
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (
+                            document["id"],
+                            sections[i]["id"],
+                            sections[j]["id"],
+                            "Potential policy/value conflict",
+                            ", ".join(values_a),
+                            ", ".join(values_b),
+                            "high",
+                            "Two sections contain different "
+                            "values for a potentially related "
+                            "policy or constraint."
+                        ))
+
+                        detected.append({
+                            "document_id":
+                                document["id"],
+                            "section_a":
+                                sections[i]["id"],
+                            "section_b":
+                                sections[j]["id"],
+                            "value_a":
+                                values_a,
+                            "value_b":
+                                values_b
+                        })
+
+    conn.commit()
+    conn.close()
+
+    audit(
+        "system",
+        "system",
+        "DETECT_CONFLICTS",
+        "conflict",
+        None,
+        f"{len(detected)} conflicts"
+    )
+
+    return {
+        "count": len(detected),
+        "conflicts": detected
     }
 
 
@@ -1221,141 +2445,187 @@ def update_impact(
 @app.get("/dashboard")
 def dashboard():
 
-    db = get_db()
+    conn = db()
 
-    documents = db.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM documents
-        """
-    ).fetchone()["count"]
+    documents = conn.execute(
+        "SELECT COUNT(*) AS c FROM documents"
+    ).fetchone()["c"]
 
-    sections = db.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM sections
-        """
-    ).fetchone()["count"]
+    cases = conn.execute(
+        "SELECT COUNT(*) AS c FROM cases"
+    ).fetchone()["c"]
 
-    affected = db.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM impacts
-        WHERE affected = 1
-        """
-    ).fetchone()["count"]
+    open_cases = conn.execute("""
+        SELECT COUNT(*) AS c
+        FROM cases
+        WHERE status='open'
+    """).fetchone()["c"]
 
-    pending = db.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM impacts
-        WHERE affected = 1
-        AND status = 'pending'
-        """
-    ).fetchone()["count"]
+    patterns = conn.execute(
+        "SELECT COUNT(*) AS c FROM patterns"
+    ).fetchone()["c"]
 
-    approved = db.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM impacts
-        WHERE status = 'approved'
-        """
-    ).fetchone()["count"]
+    pending_decisions = conn.execute("""
+        SELECT COUNT(*) AS c
+        FROM decisions
+        WHERE status='pending'
+    """).fetchone()["c"]
 
-    rejected = db.execute(
-        """
-        SELECT COUNT(*) AS count
-        FROM impacts
-        WHERE status = 'rejected'
-        """
-    ).fetchone()["count"]
+    conflicts = conn.execute(
+        "SELECT COUNT(*) AS c FROM conflicts"
+    ).fetchone()["c"]
 
-    db.close()
+    impacts = conn.execute(
+        "SELECT COUNT(*) AS c FROM impacts"
+    ).fetchone()["c"]
 
-    if sections:
+    outcomes = conn.execute(
+        "SELECT COUNT(*) AS c FROM outcomes"
+    ).fetchone()["c"]
 
-        health = max(
-            0,
-            round(
-                100 -
-                (
-                    affected /
-                    sections *
-                    100
-                )
-            )
-        )
-
-    else:
-
-        health = 100
+    conn.close()
 
     return {
+        "system_score":
+            calculate_health(),
         "documents":
             documents,
-
-        "sections":
-            sections,
-
-        "affected":
-            affected,
-
-        "pending":
-            pending,
-
-        "approved":
-            approved,
-
-        "rejected":
-            rejected,
-
-        "health":
-            health,
-
-        "gemini":
-            bool(gemini_client),
-
-        "model":
-            GEMINI_MODEL
+        "cases":
+            cases,
+        "open_cases":
+            open_cases,
+        "patterns":
+            patterns,
+        "pending_decisions":
+            pending_decisions,
+        "conflicts":
+            conflicts,
+        "impacts":
+            impacts,
+        "outcomes":
+            outcomes,
+        "pulse": {
+            "urgent_cases":
+                open_cases,
+            "emerging_patterns":
+                patterns,
+            "knowledge_risks":
+                conflicts,
+            "decisions_waiting":
+                pending_decisions
+        }
     }
 
 
 # ============================================================
-# RESET
+# KNOWLEDGE HEALTH
+# ============================================================
+
+@app.get("/knowledge-health")
+def knowledge_health():
+
+    conn = db()
+
+    documents = conn.execute("""
+        SELECT *
+        FROM documents
+    """).fetchall()
+
+    total_sections = conn.execute("""
+        SELECT COUNT(*) AS c
+        FROM sections
+    """).fetchone()["c"]
+
+    impacted = conn.execute("""
+        SELECT COUNT(*) AS c
+        FROM impacts
+        WHERE affected=1
+    """).fetchone()["c"]
+
+    conflict_count = conn.execute("""
+        SELECT COUNT(*) AS c
+        FROM conflicts
+    """).fetchone()["c"]
+
+    conn.close()
+
+    score = 100
+
+    if total_sections:
+
+        score -= min(
+            int(
+                impacted
+                / total_sections
+                * 30
+            ),
+            30
+        )
+
+    score -= min(
+        conflict_count * 5,
+        25
+    )
+
+    return {
+        "score":
+            max(0, score),
+        "documents":
+            len(documents),
+        "sections":
+            total_sections,
+        "impacted_sections":
+            impacted,
+        "conflicts":
+            conflict_count
+    }
+
+
+# ============================================================
+# RESET — DEVELOPMENT ONLY
 # ============================================================
 
 @app.delete("/reset")
-def reset_data():
+def reset_database():
 
-    db = get_db()
+    conn = db()
 
-    db.execute(
-        "DELETE FROM impacts"
-    )
+    tables = [
+        "documents",
+        "sections",
+        "cases",
+        "evidence",
+        "patterns",
+        "simulations",
+        "decisions",
+        "audit_logs",
+        "outcomes",
+        "changes",
+        "impacts",
+        "versions",
+        "conflicts"
+    ]
 
-    db.execute(
-        "DELETE FROM changes"
-    )
+    for table in tables:
 
-    db.execute(
-        "DELETE FROM sections"
-    )
+        conn.execute(
+            f"DELETE FROM {table}"
+        )
 
-    db.execute(
-        "DELETE FROM documents"
-    )
-
-    db.commit()
-
-    db.close()
+    conn.commit()
+    conn.close()
 
     for file in UPLOAD_DIR.iterdir():
 
         if file.is_file():
 
-            file.unlink()
+            try:
+                file.unlink()
+            except Exception:
+                pass
 
     return {
+        "success": True,
         "message":
-            "RIPPLE workspace reset."
+            "RIPPLE development data reset."
     }
